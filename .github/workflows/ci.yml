@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # about 1 min
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run ruff check src tests && uv run ruff format --check src tests
+      - run: uv run pytest -q

@@ -1,0 +1,37 @@
+[project]
+name = "testmap"
+version = "0.1.0"
+description = "Run in each pull request only the tests a change can break, from a map of what every test runs and reads."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "coverage>=7.10",
+    "pytest-cov>=6.0",
+]
+
+[project.scripts]
+testmap = "testmap.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.6",
+    "ruff>=0.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["fixtures"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# An audit hook must never raise, so the hooks swallow every error on purpose.
+select = ["E", "F", "I", "UP", "B"]
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
