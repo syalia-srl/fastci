@@ -5,9 +5,10 @@ import urllib.error
 from fastci import execute as ex
 from fastci import fetch
 from fastci.adapter import Project
+from fastci.config import default_tiers
 from fastci.plan import Step
 from fastci.python.mapfile import TestMap
-from fastci.tier import Context
+from fastci.tier import detect
 
 PROJ = Project("fake", ".", frozenset({"pytest"}), ())
 
@@ -77,7 +78,7 @@ def save_map(path, sha):
     TestMap(sha=sha, tests=[], durations=[], always=set(), files={}, reads={}).save(str(path))
 
 
-T1 = Context("T1", "origin/main", True, "pr")
+PR = detect({}, "main", default_tiers(), "pr")
 
 
 def test_ensure_map_skips_download_when_sha_matches(monkeypatch, tmp_path):
@@ -88,7 +89,7 @@ def test_ensure_map_skips_download_when_sha_matches(monkeypatch, tmp_path):
     art = {"workflow_run": {"head_sha": "abc"}, "archive_download_url": "u"}
     monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: art)
     monkeypatch.setattr(fetch, "_download", lambda *a: (_ for _ in ()).throw(AssertionError))
-    assert ex.ensure_map(str(tmp_path), T1, "o/r", "main") == str(path)
+    assert ex.ensure_map(str(tmp_path), PR, "o/r", "main") == str(path)
 
 
 def test_ensure_map_downloads_a_newer_map(monkeypatch, tmp_path):
@@ -96,7 +97,7 @@ def test_ensure_map_downloads_a_newer_map(monkeypatch, tmp_path):
     art = {"workflow_run": {"head_sha": "new"}, "archive_download_url": "u"}
     monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: art)
     monkeypatch.setattr(fetch, "_download", lambda url, token, out: save_map(out, "new"))
-    path = ex.ensure_map(str(tmp_path), T1, "o/r", "main")
+    path = ex.ensure_map(str(tmp_path), PR, "o/r", "main")
     with gzip.open(path) as f:
         assert json.load(f)["sha"] == "new"
 
@@ -108,7 +109,7 @@ def test_ensure_map_returns_none_offline(monkeypatch, tmp_path, capsys):
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(fetch, "newest_artifact", boom)
-    assert ex.ensure_map(str(tmp_path), T1, "o/r", "main") is None
+    assert ex.ensure_map(str(tmp_path), PR, "o/r", "main") is None
     err = capsys.readouterr().err.strip().splitlines()
     assert len(err) == 1 and err[0].startswith("fastci: ")
 
@@ -145,6 +146,6 @@ def test_a_laptop_gives_up_on_github_quickly(monkeypatch, tmp_path):
     seen = []
     monkeypatch.setenv("GH_TOKEN", "t")
     monkeypatch.setattr(fetch, "newest_artifact", lambda *a, timeout=60: seen.append(timeout))
-    ex.ensure_map(str(tmp_path), Context("T0", "origin/main", False, "laptop"), "o/r", "main")
-    ex.ensure_map(str(tmp_path), T1, "o/r", "main")
+    ex.ensure_map(str(tmp_path), detect({}, "main", default_tiers(), "local"), "o/r", "main")
+    ex.ensure_map(str(tmp_path), PR, "o/r", "main")
     assert seen[0] == 5 and seen[-1] == 60

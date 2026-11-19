@@ -4,12 +4,12 @@ import pytest
 from conftest import run_testmap
 
 from fastci.adapter import Check, Project
-from fastci.config import Config, StageSpec
+from fastci.config import Config, StageSpec, default_tiers
 from fastci.plan import build, changed_files
 from fastci.python.adapter import PY
 from fastci.python.mapfile import TestMap
 from fastci.python.pick import Pick, Picker
-from fastci.tier import Context
+from fastci.tier import detect
 
 NOT_RELEASE = "not (slow or gpu or browser or e2e or bench)"
 CHECKS = (
@@ -19,10 +19,9 @@ CHECKS = (
     Check("types", "uv run ty check", None, PY),
 )
 PROJ = Project("python", ".", frozenset({"uv", "pytest", "ruff", "ty"}), CHECKS)
-T0 = Context("T0", "origin/main", False, "laptop")
-T1 = Context("T1", "origin/main", True, "pr")
-T2 = Context("T2", None, True, "main")
-T3 = Context("T3", None, True, "release")
+LOCAL, PR, MAIN, RELEASE = (
+    detect({}, "main", default_tiers(), t) for t in ("local", "pr", "main", "release")
+)
 
 
 def tmap(tests=("tests/test_a.py::test_a", "tests/test_b.py::test_b"), durations=(2.0, 0.5)):
@@ -45,8 +44,8 @@ def step(steps, name):
     return next(s for s in steps if s.stage == name)
 
 
-def test_t1_skips_checks_when_only_docs_changed():
-    steps = plan(T1, {"README.md"}, Pick(False, set(), set(), {}), tmap())
+def test_pr_skips_checks_when_only_docs_changed():
+    steps = plan(PR, {"README.md"}, Pick(False, set(), set(), {}), tmap())
     assert stages(steps) == [
         ("lock", "skip"),
         ("format", "skip"),
@@ -58,21 +57,21 @@ def test_t1_skips_checks_when_only_docs_changed():
     assert step(steps, "format").reason == "no changed file matches"
 
 
-def test_t0_without_map_runs_only_changed_test_files():
-    steps = plan(T0, {"tests/test_x.py", "src/a.py"})
+def test_local_without_map_runs_only_changed_test_files():
+    steps = plan(LOCAL, {"tests/test_x.py", "src/a.py"})
     t = step(steps, "tests")
     assert t.action == "run" and t.select == ["tests/test_x.py"]
     assert t.reason == "no map; only changed test files, main runs the rest"
     assert step(steps, "always").action == "run"
 
 
-def test_t1_without_map_runs_every_test():
-    t = step(plan(T1, {"src/a.py"}), "tests")
+def test_pr_without_map_runs_every_test():
+    t = step(plan(PR, {"src/a.py"}), "tests")
     assert t.action == "run" and t.select is None and t.reason == "no map; every test runs"
 
 
 def test_no_merge_base_runs_everything():
-    steps = plan(T1, None, None, tmap())
+    steps = plan(PR, None, None, tmap())
     assert all(s.action == "run" for s in steps if s.stage in ("format", "lint", "types"))
     t = step(steps, "tests")
     assert t.select is None and t.reason.startswith("no merge-base with origin/main")
@@ -80,39 +79,39 @@ def test_no_merge_base_runs_everything():
 
 def test_picked_tests_run_fastest_first():
     pick = Pick(False, {"tests/test_a.py::test_a", "tests/test_b.py::test_b"}, set(), {})
-    t = step(plan(T1, {"src/a.py"}, pick, tmap()), "tests")
+    t = step(plan(PR, {"src/a.py"}, pick, tmap()), "tests")
     assert t.select == ["tests/test_b.py::test_b", "tests/test_a.py::test_a"]
     assert t.command[-2:] == ["-m", NOT_RELEASE]
 
 
-def test_t2_runs_whole_fast_suite_and_no_release_stage():
-    steps = plan(T2, None, None, tmap())
+def test_main_runs_whole_fast_suite_and_no_marked_stage():
+    steps = plan(MAIN, None, None, tmap())
     t = step(steps, "tests")
     assert t.select is None and t.command[-2:] == ["-m", NOT_RELEASE]
-    assert "release" not in [s.stage for s in steps]
+    assert "marked" not in [s.stage for s in steps]
 
 
-def test_t3_release_stage_drops_gpu_without_gpu():
-    r = step(plan(T3, None, None, tmap(), gpu=False), "release")
+def test_release_marked_stage_drops_gpu_without_gpu():
+    r = step(plan(RELEASE, None, None, tmap(), gpu=False), "marked")
     assert r.command[-2:] == ["-m", "slow or browser or e2e or bench"]
     assert "gpu" in r.reason
 
 
 def test_bare_project_has_no_steps():
     bare = Project("python", ".", frozenset(), ())
-    assert plan(T1, {"src/a.py"}, projects=(bare,)) == []
+    assert plan(PR, {"src/a.py"}, projects=(bare,)) == []
 
 
 def test_config_stage_after_lint_and_override():
     cfg = Config(stages={"docs": StageSpec("make docs", after="lint"), "types": StageSpec("")})
-    steps = plan(T2, None, None, tmap(), cfg=cfg)
+    steps = plan(MAIN, None, None, tmap(), cfg=cfg)
     assert [s.stage for s in steps][:4] == ["lock", "format", "lint", "docs"]
     assert "types" not in [s.stage for s in steps]
 
 
 def test_config_stage_outside_its_tiers_is_left_out():
-    cfg = Config(stages={"docs": StageSpec("make docs", tiers=frozenset({"T2"}))})
-    assert "docs" not in [s.stage for s in plan(T1, {"src/a.py"}, cfg=cfg)]
+    cfg = Config(stages={"docs": StageSpec("make docs", tiers=frozenset({"main"}))})
+    assert "docs" not in [s.stage for s in plan(PR, {"src/a.py"}, cfg=cfg)]
 
 
 def git(cwd, *args):
@@ -146,7 +145,7 @@ def test_changed_files_sees_untracked_test(tmp_git_repo):
 
 def test_untracked_test_file_is_picked_with_a_map():
     pick = Pick(False, set(), set(), {})
-    t = step(plan(T0, {"tests/test_new.py"}, pick, tmap()), "tests")
+    t = step(plan(LOCAL, {"tests/test_new.py"}, pick, tmap()), "tests")
     assert t.select == ["tests/test_new.py"]
 
 
@@ -174,6 +173,22 @@ def test_plan_command_prints_steps(tmp_git_repo, monkeypatch, capsys):
     monkeypatch.delenv("CI", raising=False)
     assert cli.main(["plan"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("no CI variable")
+    assert out[0] == "tier local (no CI variable), diffed against origin/main"
     assert out[1].startswith("1. format") and "pyproject.toml" not in out[1]
     assert any(line.startswith("4. tests") and "no map" in line for line in out)
+
+
+def test_tier_before_the_subcommand_is_kept(tmp_git_repo, monkeypatch, capsys):
+    from fastci import cli
+
+    monkeypatch.chdir(tmp_git_repo)
+    assert cli.main(["--tier", "main", "plan"]) == 0
+    assert capsys.readouterr().out.startswith("tier main (asked for)")
+
+
+def test_unknown_tier_is_a_clear_error(tmp_git_repo, monkeypatch, capsys):
+    from fastci import cli
+
+    monkeypatch.chdir(tmp_git_repo)
+    assert cli.main(["plan", "--tier", "T1"]) == 2
+    assert "no tier named 'T1'; the tiers are local, release, main, pr" in capsys.readouterr().err

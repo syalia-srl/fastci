@@ -16,7 +16,7 @@ class Check:
     name: str  # "lock" | "format" | "lint" | "types" | a config stage name
     run: str  # shell command
     fix: str | None  # the rewriting command for `fastci fix`, or None
-    applies_to: tuple[str, ...]  # globs; skipped in T0/T1 when no changed file matches
+    applies_to: tuple[str, ...]  # globs; skipped when the tier diffs and no changed file matches
 
 
 @dataclass(frozen=True)

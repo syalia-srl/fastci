@@ -14,7 +14,7 @@ from .local import killed_by_cap
 from .plan import Step
 from .tier import Context
 
-TEST_STAGES = ("always", "tests", "release")
+TEST_STAGES = ("always", "tests", "marked")
 MAP = os.path.join(".fastci", "map.json.gz")
 
 
@@ -75,7 +75,7 @@ def repo_of(root: str) -> str | None:
 
 def _token(ctx: Context) -> str | None:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token or ctx.tier != "T0":
+    if token or not ctx.spec.capped:
         return token
     try:
         out = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
@@ -97,13 +97,13 @@ def ensure_map(root: str, ctx: Context, repo: str | None, branch: str) -> str | 
     """The path of a usable map, fetching main's newest when it is newer than ours."""
     path = os.path.join(root, MAP)
     have = path if os.path.exists(path) else None
-    if ctx.tier == "T2" or repo is None:
+    if ctx.spec.tests == "all" or repo is None:
         return have
     token = _token(ctx)
     if not token:
         return have
     # On a laptop a dead network must not hold up the checks.
-    timeout = 5 if ctx.tier == "T0" else 60
+    timeout = 5 if ctx.spec.capped else 60
     try:
         art = fetch.newest_artifact(repo, "fastci", branch, token, timeout=timeout)
         if art is None:

@@ -6,15 +6,36 @@ moves a repository's CI to it, person or agent.
 
 ## What runs where
 
-| Tier | Where | What runs |
+| Tier | When | What runs |
 |---|---|---|
-| T0 | a laptop (no `CI` variable) | lock, format, lint and type checks on changed files; tests marked `always`; the tests the change can break. Capped workers and memory, `nice 10`, stops at the first failing test. Never `slow`, `gpu`, `browser`, `e2e` or `bench`. |
-| T1 | a pull request | the same checks and picked tests, every failure reported |
-| T2 | a push to the default branch | every check, the whole fast suite; a second job records the map that T0 and T1 pick from |
-| T3 | a `release/**` branch or a `v*` tag | T2, then the release-only classes: `slow`, `gpu`, `browser`, `e2e`, `bench` |
+| `local` | no `CI` variable: a laptop | lock, format, lint and type checks on changed files; tests marked `always`; the tests the change can break. Capped workers and memory, `nice 10`, stops at the first failing test. No release-only marks. |
+| `release` | a `release/*` branch or a `v*` tag | every check, the whole fast suite, then the release-only marks: `slow`, `gpu`, `browser`, `e2e`, `bench` |
+| `main` | a push to the default branch | every check and the whole fast suite; a second job records the map |
+| `pr` | any other CI run: a pull request, a push to another branch | the same as `local`, every failure reported, uncapped |
+
+Each tier is a table under `[tool.fastci.tiers]`, and the first whose `when`
+matches wins. A repository can change any key of a default tier, or add tiers
+of its own, which are tried before the defaults:
+
+```toml
+[tool.fastci.tiers.main]
+marks = ["slow"]                  # also run the slow tests on every merge
+
+[tool.fastci.tiers.nightly]
+when = { event = "schedule" }     # ci = true|false, event = names, ref = globs
+tests = "all"                     # "picked" (what the change can break) or "all"
+marks = ["slow", "e2e", "bench"]  # release-only marks this tier runs
+```
+
+The other keys: `without-map` (`"all"` or `"changed"`, what `picked` runs
+without a map; `"changed"` only on `local`), `fail-fast` (stop at the first
+failing test; on for `local`) and `capped` (the `[tool.fastci.local]` caps,
+`nice 10` and `gh`'s token; on for `local`). In `ref`, `{default-branch}`
+stands for the default branch. A tier without `when` runs only with
+`fastci --tier <name>`.
 
 `fastci plan` prints what would run here and why, without running it.
-`fastci --tier T1 --base origin/main` runs another tier's plan.
+`fastci --tier pr --base origin/main` runs another tier's plan.
 
 ## Migrating a repository
 
@@ -31,11 +52,11 @@ moves a repository's CI to it, person or agent.
 4. Run `fastci setup --check`. Each line is a step of the old CI that fastci
    does not run. For each, do one of:
    - make it a stage: `[tool.fastci.stages] docs = "make docs"` (add
-     `tiers = ["T1", "T2"]` or `after = "lint"` when it matters);
+     `tiers = ["pr", "main"]` or `after = "lint"` when it matters);
    - keep it in its own workflow when it is not a test (a deploy, a release);
    - drop it, and say why in the pull request.
    Repeat until `fastci setup --check` exits 0.
-5. Run `fastci plan --tier T1 --base HEAD~5` and two or three other recent
+5. Run `fastci plan --tier pr --base HEAD~5` and two or three other recent
    bases. Each shows what that change would have run.
 6. Run `fastci` locally. Open the pull request with the plans from step 5,
    a green run, and the CI minutes of the last few pull requests before it.
@@ -48,10 +69,12 @@ Until then a pull request runs every test and says so.
 - `@pytest.mark.always`: a test that compares a generated file with its
   source (a stub, an index, a copied asset). It fails in every change that
   forgot to regenerate the file, so every tier runs it.
-- `slow`, `gpu`, `browser`, `e2e`, `bench`: run only on a release branch.
+- `slow`, `gpu`, `browser`, `e2e`, `bench`: run only in the tiers whose `marks`
+  list them; by default only `release`.
   `fastci setup --from-map .fastci/map.json.gz` proposes `slow` for tests over
   `slow-seconds` (10 by default) in a map recorded on the default branch.
-- `[tool.fastci.tests] release-only` changes which marks wait for a release.
+- `[tool.fastci.tests] release-only` changes which marks the fast suite leaves
+  out; `release` runs them unless its own `marks` says otherwise.
 
 ## Reading why a test was picked
 
@@ -76,5 +99,6 @@ the cause of the miss:
   available memory, through a systemd user scope where one exists.
 - `workers = "auto"` sizes pytest-xdist workers from free memory and the peak
   memory the map recorded; set a number to fix it.
-- `fail-fast = false` reports every failing test instead of the first.
+- `[tool.fastci.tiers.local] fail-fast = false` reports every failing test
+  instead of the first.
 - `fastci fix` runs the formatters and fixers, then the checks.

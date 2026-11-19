@@ -9,11 +9,12 @@ language lives in an adapter (`fastci.adapter.Adapter`). The full design,
 including the adapters, suites and end-to-end maps still to come, is
 `docs/superpowers/specs/2026-11-19-fastci-design.html`.
 
-- **The tier** (`fastci.tier`) reads the CI environment: a laptop, a pull
-  request, a push to the default branch, or a release.
+- **The tier** (`fastci.tier`) picks the first configured tier whose `when`
+  matches the CI environment; the defaults (`fastci.config.default_tiers`) are
+  local, release, main and pr. The tier's table says what the rest does.
 - **The plan** (`fastci.plan`) orders the stages for that tier: every project's
   checks, then the tests marked always, then the picked tests, then on a
-  release the release-only classes. Each step carries the reason it runs or is
+  the release-only marks the tier lists. Each step carries the reason it runs or is
   skipped.
 - **Execution** (`fastci.execute`) runs the steps and stops at the first that
   fails; on a laptop each command runs under the caps from `fastci.local`.

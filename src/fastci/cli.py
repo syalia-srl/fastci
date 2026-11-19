@@ -57,8 +57,8 @@ def _context(args):
 
     root = _root()
     cfg = load(root)
-    ctx = detect(os.environ, cfg.default_branch, args.tier)
-    if args.base and ctx.tier in ("T0", "T1"):
+    ctx = detect(os.environ, cfg.default_branch, cfg.tiers, args.tier)
+    if args.base and ctx.base:
         ctx = dataclasses.replace(ctx, base=args.base)
     return root, cfg, ctx, local.has_gpu()
 
@@ -90,7 +90,7 @@ def _prepare(args):
         n = ["-n", str(caps["workers"])]
         steps = [
             dataclasses.replace(s, command=[*s.command, *n])
-            if s.action == "run" and s.stage in ("tests", "release")
+            if s.action == "run" and s.stage in ("tests", "marked")
             else s
             for s in steps
         ]
@@ -102,7 +102,7 @@ def _caps(cfg, ctx, projects, maps) -> dict:
     from . import local
 
     none = {"workers": 0, "wrap": lambda a: a, "note": None, "line": None}
-    if ctx.tier != "T0":
+    if not ctx.spec.capped:
         return none
     avail = local.mem_available()
     systemd = local.has_systemd_user()
@@ -146,7 +146,7 @@ def _run(args) -> int:
         root,
         {a.name: a for a in adapters()},
         {p.root: p for p in projects},
-        fail_fast_tests=ctx.tier == "T0" and cfg.local.fail_fast,
+        fail_fast_tests=ctx.spec.fail_fast,
         wrap=caps["wrap"],
         cap_note=caps["note"],
     )
@@ -158,7 +158,8 @@ def _fix(args) -> int:
     from .adapter import adapters
     from .execute import execute, say
 
-    args.tier = "T0"
+    _, cfg, _, _ = _context(args)
+    args.tier = next((n for n, t in cfg.tiers.items() if t.capped), args.tier)
     root, cfg, ctx, projects, steps, caps = _prepare(args)
     by_root = {p.root: p for p in projects}
     for s in steps:
@@ -168,7 +169,7 @@ def _fix(args) -> int:
         if fix:
             say(f"{s.stage}: {fix}")
             subprocess.run(["sh", "-c", fix], cwd=os.path.join(root, s.project))
-    checks = [s for s in steps if s.stage not in ("always", "tests", "release")]
+    checks = [s for s in steps if s.stage not in ("always", "tests", "marked")]
     return execute(checks, root, {a.name: a for a in adapters()}, by_root, False)
 
 
@@ -200,8 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
     parser = argparse.ArgumentParser(prog="fastci", description=__doc__)
-    parser.add_argument("--tier", choices=["T0", "T1", "T2", "T3"], help="override the tier")
-    parser.add_argument("--base", help="what the change is compared to (T0 and T1)")
+    parser.add_argument("--tier", help="run as this tier (local, pr, main, release or your own)")
+    parser.add_argument("--base", help="what the change is compared to, in a tier that diffs")
     parser.add_argument("--map", default=DEFAULT_MAP)
     top = parser.add_subparsers(dest="top")
     top.add_parser("fix", help="rewrite what the checks can fix (format, lint), then check")
@@ -230,9 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     fe.add_argument("--out", default=DEFAULT_MAP)
 
     pl = top.add_parser("plan", help="print what fastci would run here, and why")
-    pl.add_argument("--tier", choices=["T0", "T1", "T2", "T3"], help="override the detected tier")
-    pl.add_argument("--base", help="what the change is compared to (T0 and T1)")
-    pl.add_argument("--map", default=DEFAULT_MAP)
+    # SUPPRESS keeps `fastci --tier pr plan` from losing the tier to the subcommand's default.
+    pl.add_argument("--tier", default=argparse.SUPPRESS, help="run as this tier")
+    pl.add_argument("--base", default=argparse.SUPPRESS, help="what the change is compared to")
+    pl.add_argument("--map", default=argparse.SUPPRESS)
 
     st = top.add_parser("setup", help="propose the config, workflow and test marks")
     st.add_argument("--diff", action="store_true", help="show each change as a diff")
@@ -244,7 +246,17 @@ def main(argv: list[str] | None = None) -> int:
     top.add_parser("guide", help="print how to move a repository's CI to fastci")
 
     args = parser.parse_args(own)
+    from .config import ConfigError
+    from .tier import TierError
 
+    try:
+        return _dispatch(args, parser, rest)
+    except (ConfigError, TierError) as e:
+        print(f"fastci: {e}", file=sys.stderr)
+        return 2
+
+
+def _dispatch(args, parser, rest) -> int:
     if args.top == "plan":
         return _plan(args)
     if args.top is None:

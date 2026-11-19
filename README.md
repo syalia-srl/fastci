@@ -17,12 +17,33 @@ uvx fastci guide          # how to move a repository's CI to fastci
 
 `fastci` reads where it runs from the environment (`--tier` overrides it):
 
-| Tier | Where | What runs |
+| Tier | When | What runs |
 |---|---|---|
-| T0 | a laptop | lock, format, lint and type checks on changed files; tests marked `always`; the tests the change can break. Capped workers and memory, `nice 10`, stops at the first failing test. |
-| T1 | a pull request | the same, every failure reported |
-| T2 | a push to the default branch | every check and the whole fast suite; a second job records the map |
-| T3 | a `release/**` branch or `v*` tag | T2, then the tests marked `slow`, `gpu`, `browser`, `e2e` or `bench` |
+| `local` | no `CI` variable: a laptop | lock, format, lint and type checks on changed files; tests marked `always`; the tests the change can break. Capped workers and memory, `nice 10`, stops at the first failing test. No release-only marks. |
+| `release` | a `release/*` branch or a `v*` tag | every check, the whole fast suite, then the release-only marks: `slow`, `gpu`, `browser`, `e2e`, `bench` |
+| `main` | a push to the default branch | every check and the whole fast suite; a second job records the map |
+| `pr` | any other CI run: a pull request, a push to another branch | the same as `local`, every failure reported, uncapped |
+
+Each tier is a table under `[tool.fastci.tiers]`, and the first whose `when`
+matches wins. A repository can change any key of a default tier, or add tiers
+of its own, which are tried before the defaults:
+
+```toml
+[tool.fastci.tiers.main]
+marks = ["slow"]                  # also run the slow tests on every merge
+
+[tool.fastci.tiers.nightly]
+when = { event = "schedule" }     # ci = true|false, event = names, ref = globs
+tests = "all"                     # "picked" (what the change can break) or "all"
+marks = ["slow", "e2e", "bench"]  # release-only marks this tier runs
+```
+
+The other keys: `without-map` (`"all"` or `"changed"`, what `picked` runs
+without a map; `"changed"` only on `local`), `fail-fast` (stop at the first
+failing test; on for `local`) and `capped` (the `[tool.fastci.local]` caps,
+`nice 10` and `gh`'s token; on for `local`). In `ref`, `{default-branch}`
+stands for the default branch. A tier without `when` runs only with
+`fastci --tier <name>`.
 
 The checks come from what the project uses: `uv lock --check`, `ruff format
 --check`, `ruff check`, and the first of `ty`, `mypy` or `pyright` it finds.
@@ -67,20 +88,19 @@ default-branch = "main"
 
 [tool.fastci.stages]              # replace a check, add one, or turn one off with ""
 # types = "mypy src"
-# docs  = { run = "make docs-check", tiers = ["T1", "T2"], after = "lint" }
+# docs  = { run = "make docs-check", tiers = ["pr", "main"], after = "lint" }
 
 [tool.fastci.tests]
 args = []                         # passed to pytest
 full = []                         # paths that mean "run everything"
 always = []                       # test files every tier runs
-release-only = ["slow", "gpu", "browser", "e2e", "bench"]
+release-only = ["slow", "gpu", "browser", "e2e", "bench"]  # left out of the fast suite
 slow-seconds = 10                 # what setup --from-map marks slow
 global-share = 1.0                # see DESIGN.md
 
 [tool.fastci.local]
 memory = "50%"                    # share of available memory for the whole run
 workers = "auto"                  # pytest-xdist workers
-fail-fast = true
 ```
 
 `[tool.testmap]` is still read, with a warning, when neither exists.

@@ -112,7 +112,7 @@ def test_guide_prints(capsys):
 
     assert cli.main(["guide"]) == 0
     out = capsys.readouterr().out
-    assert "fastci setup --check" in out and "T3" in out
+    assert "fastci setup --check" in out and "[tool.fastci.tiers" in out
 
 
 def test_workflows_without_pull_request_are_left_alone(tmp_path):

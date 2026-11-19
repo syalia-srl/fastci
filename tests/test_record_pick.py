@@ -119,7 +119,7 @@ def test_fastci_runs_the_picked_tests_in_a_pull_request(mapped):
     env = {k: v for k, v in os.environ.items() if not k.startswith(("FASTCI_", "GITHUB_"))}
     env["CI"] = "true"
     p = subprocess.run(
-        [sys.executable, "-m", "fastci.cli", "--tier", "T1", "--base", "HEAD~1"],
+        [sys.executable, "-m", "fastci.cli", "--tier", "pr", "--base", "HEAD~1"],
         cwd=mapped,
         capture_output=True,
         text=True,
