@@ -242,7 +242,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
   .prow2 .pol,.prow2 .st{grid-column:2}
 }
 
-.sim{border:1px solid var(--border);border-radius:10px;padding:12px;margin:12px 0;background:var(--panel)}
+.sim{border:1px solid var(--rule);border-radius:10px;padding:12px;margin:12px 0;background:var(--surface)}
 .sim .files{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0;font-family:'JBM',monospace;font-size:12.5px}
 .sim .files label{display:flex;gap:6px;align-items:center;min-height:28px}
 .sim .plan{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -332,14 +332,14 @@ pre{overflow-x:auto}
 <h2 id="fits"><span class="n">03</span>How it fits</h2>
 <p>One run has three steps: work out the case, build the plan, run the plan stage by stage.</p>
 <svg viewBox="0 0 720 200" width="100%" role="img" aria-label="fastci reads its environment and the git diff, builds a plan of stages, and runs them in order, stopping at the first failure" style="max-width:720px;display:block;margin:14px 0">
-  <g font-family="JBM, monospace" font-size="12" fill="var(--text)">
-    <rect x="10" y="20" width="170" height="60" rx="8" fill="var(--panel)" stroke="var(--border)"/>
+  <g font-family="JBM, monospace" font-size="12" fill="var(--ink)">
+    <rect x="10" y="20" width="170" height="60" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
     <text x="22" y="45">environment</text><text x="22" y="64" fill="var(--muted)">CI vars, branch, tag</text>
-    <rect x="10" y="110" width="170" height="60" rx="8" fill="var(--panel)" stroke="var(--border)"/>
+    <rect x="10" y="110" width="170" height="60" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
     <text x="22" y="135">git diff + map</text><text x="22" y="154" fill="var(--muted)">base = merge-base</text>
-    <rect x="250" y="55" width="190" height="80" rx="8" fill="var(--panel)" stroke="var(--accent)"/>
+    <rect x="250" y="55" width="190" height="80" rx="8" fill="var(--surface)" stroke="var(--accent)"/>
     <text x="264" y="82">plan</text><text x="264" y="102" fill="var(--muted)">tier + config</text><text x="264" y="120" fill="var(--muted)">→ ordered stages</text>
-    <rect x="510" y="20" width="200" height="150" rx="8" fill="var(--panel)" stroke="var(--border)"/>
+    <rect x="510" y="20" width="200" height="150" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
     <text x="524" y="45">run</text>
     <text x="524" y="70" fill="var(--muted)">1 format</text><text x="524" y="88" fill="var(--muted)">2 lint</text><text x="524" y="106" fill="var(--muted)">3 types</text><text x="524" y="124" fill="var(--muted)">4 always</text><text x="524" y="142" fill="var(--muted)">5 picked tests</text><text x="524" y="160" fill="var(--muted)">stop at first red</text>
   </g>
