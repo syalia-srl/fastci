@@ -172,6 +172,24 @@ def _fix(args) -> int:
     return execute(checks, root, {a.name: a for a in adapters()}, by_root, False)
 
 
+def _setup(args) -> int:
+    from . import setup
+
+    root = _root()
+    changes = setup.propose(root, args.from_map)
+    print(setup.detect_summary(root))
+    if args.diff:
+        print(setup.diff(changes), end="")
+    else:
+        print("\n".join(setup.summary_lines(changes)) or "nothing to change")
+    if args.write:
+        setup.apply(root, changes)
+        print(f"wrote {len(changes)} changes")
+    elif changes and not args.diff:
+        print("\nrun `fastci setup --write` to apply, `fastci setup --diff` to see each change")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
@@ -210,6 +228,11 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--base", help="what the change is compared to (T0 and T1)")
     pl.add_argument("--map", default=DEFAULT_MAP)
 
+    st = top.add_parser("setup", help="propose the config, workflow and test marks")
+    st.add_argument("--diff", action="store_true", help="show each change as a diff")
+    st.add_argument("--write", action="store_true", help="apply the changes")
+    st.add_argument("--from-map", help="also mark tests slower than slow-seconds in this map")
+
     args = parser.parse_args(own)
 
     if args.top == "plan":
@@ -218,12 +241,21 @@ def main(argv: list[str] | None = None) -> int:
         return _run(args)
     if args.top == "fix":
         return _fix(args)
+    if args.top == "setup":
+        return _setup(args)
 
     if args.cmd == "record":
+        from .python.adapter import PythonAdapter
         from .python.record import default_sources, record
 
         root = _root()
-        return record(rest, args.out, args.source or default_sources(root), root)
+        if args.source:
+            return record(rest, args.out, args.source, root)
+        adapter = PythonAdapter()
+        projects = adapter.detect(root)
+        if not projects:
+            return record(rest, args.out, default_sources(root), root)
+        return adapter.record(projects[0], root, os.path.abspath(args.out), rest)
 
     if args.cmd == "fetch":
         from .fetch import fetch
