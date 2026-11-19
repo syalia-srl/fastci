@@ -72,11 +72,66 @@ def _plan(args) -> int:
     return 0
 
 
+def _prepare(args):
+    from .execute import ensure_map, repo_of
+    from .plan import build, gather
+
+    root, cfg, ctx, gpu = _context(args)
+    map_path = os.path.join(root, args.map)
+    if args.map == DEFAULT_MAP:
+        map_path = ensure_map(root, ctx, repo_of(root), cfg.default_branch) or map_path
+    projects, changed, picks, maps = gather(root, ctx, cfg, map_path)
+    steps = build(ctx, cfg, root, projects, changed, picks, maps, gpu)
+    return root, cfg, ctx, projects, steps
+
+
+def _run(args) -> int:
+    from .adapter import adapters
+    from .execute import execute, say
+
+    root, cfg, ctx, projects, steps = _prepare(args)
+    say(ctx.reason)
+    if not steps:
+        say("nothing to check here: no project with checks or tests was found")
+        return 0
+    return execute(
+        steps,
+        root,
+        {a.name: a for a in adapters()},
+        {p.root: p for p in projects},
+        fail_fast_tests=ctx.tier == "T0" and cfg.local.fail_fast,
+    )
+
+
+def _fix(args) -> int:
+    import subprocess
+
+    from .adapter import adapters
+    from .execute import execute, say
+
+    args.tier = "T0"
+    root, cfg, ctx, projects, steps = _prepare(args)
+    by_root = {p.root: p for p in projects}
+    for s in steps:
+        if s.action != "run":
+            continue
+        fix = next((c.fix for c in by_root[s.project].checks if c.name == s.stage), None)
+        if fix:
+            say(f"{s.stage}: {fix}")
+            subprocess.run(["sh", "-c", fix], cwd=os.path.join(root, s.project))
+    checks = [s for s in steps if s.stage not in ("always", "tests", "release")]
+    return execute(checks, root, {a.name: a for a in adapters()}, by_root, False)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
     parser = argparse.ArgumentParser(prog="fastci", description=__doc__)
-    top = parser.add_subparsers(dest="top", required=True)
+    parser.add_argument("--tier", choices=["T0", "T1", "T2", "T3"], help="override the tier")
+    parser.add_argument("--base", help="what the change is compared to (T0 and T1)")
+    parser.add_argument("--map", default=DEFAULT_MAP)
+    top = parser.add_subparsers(dest="top")
+    top.add_parser("fix", help="rewrite what the checks can fix (format, lint), then check")
     mp = top.add_parser("map", help="record, read and fetch the map of what each test runs")
     sub = mp.add_subparsers(dest="cmd", required=True)
 
@@ -110,6 +165,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.top == "plan":
         return _plan(args)
+    if args.top is None:
+        return _run(args)
+    if args.top == "fix":
+        return _fix(args)
 
     if args.cmd == "record":
         from .python.record import default_sources, record

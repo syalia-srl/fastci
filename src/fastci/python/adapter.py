@@ -99,7 +99,7 @@ class PythonAdapter:
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [FASTCI_PATH, env.get("PYTHONPATH")]))
         return env
 
-    def run_tests(self, project, repo, select, args, env) -> int:
+    def run_tests(self, project, repo, select, args, env, wrap=lambda a: a) -> int:
         extra = dict(env)
         if select is not None:
             fd, path = tempfile.mkstemp(prefix="fastci-select-", suffix=".txt")
@@ -107,7 +107,7 @@ class PythonAdapter:
                 f.write("\n".join(select) + "\n")
             extra["FASTCI_SELECT"] = path
         cmd = [*self.python(project), "-m", "pytest", "-p", "fastci.python.plugin", *args]
-        code = subprocess.run(cmd, cwd=os.path.join(repo, project.root), env=self.env(extra))
+        code = subprocess.run(wrap(cmd), cwd=os.path.join(repo, project.root), env=self.env(extra))
         return code.returncode
 
     def record(self, project, repo, out, args) -> int:

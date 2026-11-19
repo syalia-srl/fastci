@@ -6,6 +6,7 @@ languages will speak the same calls as JSON over stdin and stdout.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -38,6 +39,7 @@ class Adapter(Protocol):
         select: list[str] | None,
         args: list[str],
         env: dict[str, str],
+        wrap: Callable[[list[str]], list[str]] = ...,
     ) -> int: ...
 
     def record(self, project: Project, repo: str, out: str, args: list[str]) -> int: ...

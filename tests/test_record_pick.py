@@ -108,3 +108,22 @@ def test_a_file_only_a_child_process_reads_picks_its_test(mapped):
     got = picked(mapped)
     assert "tests/test_sub.py::test_child_reads_data" in got
     assert "tests/test_calc.py::test_add" not in got
+
+
+def test_fastci_runs_the_picked_tests_in_a_pull_request(mapped):
+    import os
+    import subprocess
+    import sys
+
+    edit(mapped, "src/sample/calc.py", "return a + b", "return b + a")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("FASTCI_", "GITHUB_"))}
+    env["CI"] = "true"
+    p = subprocess.run(
+        [sys.executable, "-m", "fastci.cli", "--tier", "T1", "--base", "HEAD~1"],
+        cwd=mapped,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert p.returncode == 0, p.stderr + p.stdout
+    assert re.search(r"fastci: tests: \d+ picked", p.stderr), p.stderr
