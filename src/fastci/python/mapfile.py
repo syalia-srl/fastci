@@ -79,6 +79,8 @@ class FileEntry:
 
 @dataclass
 class TestMap:
+    __test__ = False
+
     sha: str
     tests: list[str]
     durations: list[float]

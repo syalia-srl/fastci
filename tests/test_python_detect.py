@@ -40,3 +40,13 @@ def test_tests_lists_ids_with_marks(tmp_path):
 def test_marks_are_registered(pytester):
     pytester.makepyfile("import pytest\n@pytest.mark.gpu\ndef test_a(): pass\n")
     assert pytester.runpytest("--strict-markers").ret == 0
+
+
+def test_selected_tests_run_in_the_select_order(pytester, monkeypatch):
+    pytester.makepyfile(test_a="def test_1(): pass\ndef test_2(): pass\n")
+    sel = pytester.path / "sel.txt"
+    sel.write_text("test_a.py::test_2\ntest_a.py::test_1\n")
+    monkeypatch.setenv("FASTCI_SELECT", str(sel))
+    r = pytester.runpytest_subprocess("-v", "-p", "fastci.python.plugin")
+    out = r.stdout.str()
+    assert out.index("test_2 PASSED") < out.index("test_1 PASSED")

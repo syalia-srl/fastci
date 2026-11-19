@@ -48,6 +48,30 @@ def _pick(args):
     return tm, p
 
 
+def _context(args):
+    import dataclasses
+    import shutil
+
+    from .config import load
+    from .tier import detect
+
+    root = _root()
+    cfg = load(root)
+    ctx = detect(os.environ, cfg.default_branch, args.tier)
+    if args.base and ctx.tier in ("T0", "T1"):
+        ctx = dataclasses.replace(ctx, base=args.base)
+    return root, cfg, ctx, shutil.which("nvidia-smi") is not None
+
+
+def _plan(args) -> int:
+    from .plan import build, gather, render
+
+    root, cfg, ctx, gpu = _context(args)
+    projects, changed, picks, maps = gather(root, ctx, cfg, os.path.join(root, args.map))
+    print(render(ctx, build(ctx, cfg, root, projects, changed, picks, maps, gpu)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
@@ -77,7 +101,15 @@ def main(argv: list[str] | None = None) -> int:
     fe.add_argument("--name", default="fastci", help="the artifact's name")
     fe.add_argument("--out", default=DEFAULT_MAP)
 
+    pl = top.add_parser("plan", help="print what fastci would run here, and why")
+    pl.add_argument("--tier", choices=["T0", "T1", "T2", "T3"], help="override the detected tier")
+    pl.add_argument("--base", help="what the change is compared to (T0 and T1)")
+    pl.add_argument("--map", default=DEFAULT_MAP)
+
     args = parser.parse_args(own)
+
+    if args.top == "plan":
+        return _plan(args)
 
     if args.cmd == "record":
         from .python.record import default_sources, record

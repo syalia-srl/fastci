@@ -116,18 +116,20 @@ if SELECT:
 
     def pytest_collection_modifyitems(config, items):
         with open(SELECT) as f:
-            wanted = {line.strip() for line in f if line.strip()}
+            order = {}
+            for line in f:
+                if line.strip():
+                    order.setdefault(line.strip(), len(order))
         keep, drop = [], []
         for item in items:
             nodeid = item.nodeid
-            if (
-                nodeid in wanted
-                or nodeid.split("::")[0] in wanted
-                or nodeid.split("[")[0] in wanted
-            ):
-                keep.append(item)
-            else:
+            keys = (nodeid, nodeid.split("[")[0], nodeid.split("::")[0])
+            rank = min((order[k] for k in keys if k in order), default=None)
+            if rank is None:
                 drop.append(item)
+            else:
+                keep.append((rank, item))
+        keep.sort(key=lambda pair: pair[0])
         if drop:
             config.hook.pytest_deselected(items=drop)
-            items[:] = keep
+        items[:] = [item for _, item in keep]
