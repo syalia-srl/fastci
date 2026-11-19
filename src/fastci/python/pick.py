@@ -1,4 +1,4 @@
-"""``testmap pick``: the tests a diff can break, according to a map.
+"""``fastci map pick``: the tests a diff can break, according to a map.
 
 The rules, in order, for every path the diff touches:
 
@@ -27,10 +27,10 @@ import fnmatch
 import os
 import re
 import subprocess
-import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
+from ..config import TestsConfig
 from .mapfile import TestMap, docstring_lines, enclosing, functions, line_hash
 
 DEFAULT_FULL = [
@@ -47,24 +47,6 @@ DEFAULT_FULL = [
     ".github/workflows/*",
 ]
 IMPORT = re.compile(r"^(from\s+\S+\s+import\b|import\s|\)$|[\w\s,]+,?\)?$)")
-
-
-@dataclass
-class Config:
-    full: list[str] = field(default_factory=lambda: list(DEFAULT_FULL))
-    always: list[str] = field(default_factory=list)
-    global_share: float = 1.0
-
-    @classmethod
-    def load(cls, root: str) -> Config:
-        path = Path(root) / "pyproject.toml"
-        cfg = cls()
-        if path.exists():
-            t = tomllib.loads(path.read_text()).get("tool", {}).get("testmap", {})
-            cfg.full += t.get("full", [])
-            cfg.always = t.get("always", [])
-            cfg.global_share = float(t.get("global_share", 1.0))
-        return cfg
 
 
 @dataclass
@@ -116,8 +98,9 @@ def in_tests_dir(path: str) -> bool:
 
 
 class Picker:
-    def __init__(self, tm: TestMap, root: str, config: Config):
-        self.tm, self.root, self.cfg = tm, root, config
+    def __init__(self, tm: TestMap, root: str, tests: TestsConfig):
+        self.tm, self.root, self.cfg = tm, root, tests
+        self.full = DEFAULT_FULL + tests.full
         self._sources: dict[str, str] | None = None
         self.by_file: dict[str, set[str]] = {}
         for t in tm.tests:
@@ -163,7 +146,7 @@ class Picker:
             tests.update(ts)
 
         for path in diff:
-            if any(fnmatch.fnmatch(path, p) for p in self.cfg.full):
+            if any(fnmatch.fnmatch(path, p) for p in self.full):
                 return Pick(True, set(self.tm.tests), set(), {"*": f"{path} changed"})
 
         for path, (head_lines, base_lines) in diff.items():

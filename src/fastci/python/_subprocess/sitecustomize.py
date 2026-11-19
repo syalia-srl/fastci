@@ -1,4 +1,4 @@
-"""Loaded by every Python process that `testmap record` starts, through PYTHONPATH.
+"""Loaded by every Python process that `fastci map record` starts, through PYTHONPATH.
 
 In a child process started by a test, coverage (started by its own subprocess
 patch) gets that test's id as its context, and the repository files the child
@@ -7,8 +7,8 @@ opens are written next to the map. Outside a test it does nothing.
 
 import os
 
-_ctx = os.environ.get("TESTMAP_CTX")
-_out = os.environ.get("TESTMAP_RECORD")
+_ctx = os.environ.get("FASTCI_CTX")
+_out = os.environ.get("FASTCI_RECORD")
 
 if _ctx and _out:
     try:
@@ -24,7 +24,7 @@ if _ctx and _out:
     import json
     import sys
 
-    _root = os.path.realpath(os.environ.get("TESTMAP_ROOT", os.getcwd()))
+    _root = os.path.realpath(os.environ.get("FASTCI_ROOT", os.getcwd()))
     _seen: set = set()
     _busy = [False]
 
@@ -41,7 +41,7 @@ if _ctx and _out:
             full = os.path.realpath(os.path.join(os.getcwd(), path))
             if full.startswith(_root + os.sep):
                 rel = os.path.relpath(full, _root)
-                if not rel.startswith((".venv", ".testmap")) and "__pycache__" not in rel:
+                if not rel.startswith((".venv", ".fastci")) and "__pycache__" not in rel:
                     _seen.add(rel)
         except Exception:
             pass

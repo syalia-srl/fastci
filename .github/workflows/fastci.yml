@@ -1,0 +1,47 @@
+# Written by `fastci setup`. fastci picks what runs from the event:
+# a pull request runs the checks and the tests the change can break, a push to
+# main runs the whole fast suite, a release branch or tag adds the slow ones.
+name: fastci
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+    tags: ["v*"]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: fastci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      # fastci tests itself from source; other repositories run `uvx fastci@X.Y.Z`.
+      - run: uv run --python ${{ matrix.python }} fastci
+        env:
+          GH_TOKEN: ${{ github.token }}
+  # Records what every test runs, for picking in pull requests. Never gates.
+  map:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fastci-map
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run fastci map record --out "$RUNNER_TEMP/fastci/map.json.gz" -- -q || echo "::warning title=fastci::suite failed under recording"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastci
+          path: ${{ runner.temp }}/fastci/map.json.gz
+          retention-days: 14

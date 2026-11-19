@@ -1,10 +1,11 @@
-# testmap
+# fastci
 
-testmap chooses which pytest tests a pull request runs. It records, on main,
-what every test executes and reads, and in a pull request it picks the tests
-that executed the changed lines or read the changed files. It exists so that a
-pull request is green in minutes and the full suite runs once, on main. It is a
-developer tool for the repositories built with aegis, public, MIT.
+fastci runs, in each case (a laptop, a pull request, the default branch, a
+release), only the checks and tests a change can break, cheapest first, and
+stops at the first failure. For Python it records, on the default branch, what
+every test executes and reads, and picks from that record. It exists so that a
+pull request is green in minutes, a laptop is never flooded by a whole suite,
+and the full suite runs once per merge. It is a public developer tool, MIT.
 
 This file changes when the goals change. Nothing in it should be made false by a
 commit that adds code or content.
@@ -28,6 +29,6 @@ saves time: recall comes before speed.
 
 ```bash
 uv sync --locked
-uv run pytest -q
-uv run ruff check src tests && uv run ruff format --check src tests
+uv run fastci            # what this change needs, on this laptop
+uv run fastci plan       # what it would run, and why
 ```

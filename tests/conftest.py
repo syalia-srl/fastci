@@ -6,11 +6,20 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ["pytester"]
+
 FIXTURE = Path(__file__).parent / "fixtures" / "sample"
 
 
 def sh(cwd, *cmd):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+@pytest.fixture(autouse=True)
+def _no_outer_fastci_run(monkeypatch):
+    """When fastci runs this suite, its own variables must not reach the runs tests start."""
+    for k in ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"):
+        monkeypatch.delenv(k, raising=False)
 
 
 @pytest.fixture
@@ -25,12 +34,13 @@ def sample(tmp_path):
 
 
 def run_testmap(repo, *args):
-    """Run the testmap CLI inside the repo; return (exit code, stdout, stderr)."""
+    """Run the fastci map CLI inside the repo; return (exit code, stdout, stderr)."""
+    args = ("map", *args)
     env = dict(os.environ)
-    env.pop("TESTMAP_SELECT", None)
-    env.pop("TESTMAP_RECORD", None)
+    env.pop("FASTCI_SELECT", None)
+    env.pop("FASTCI_RECORD", None)
     p = subprocess.run(
-        [sys.executable, "-m", "testmap.cli", *args],
+        [sys.executable, "-m", "fastci.cli", *args],
         cwd=repo,
         capture_output=True,
         text=True,
