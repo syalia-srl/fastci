@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ["pytester"]
+
 FIXTURE = Path(__file__).parent / "fixtures" / "sample"
 
 

@@ -87,8 +87,29 @@ if RECORD:
             )
 
 
+MARKS = {
+    "always": "fastci runs this test in every tier",
+    "slow": "fastci runs this test only on a release branch",
+    "gpu": "needs a GPU; fastci runs it only on a release branch where a GPU is found",
+    "browser": "drives a browser; fastci runs it only on a release branch",
+    "e2e": "drives the whole product; fastci runs it only on a release branch",
+    "bench": "measures speed; fastci runs it only on a release branch",
+}
+COLLECT = os.environ.get("FASTCI_COLLECT")
+
+
 def pytest_configure(config):
-    config.addinivalue_line("markers", "always: fastci runs this test in every tier")
+    for name, text in MARKS.items():
+        config.addinivalue_line("markers", f"{name}: {text}")
+
+
+if COLLECT:
+
+    def pytest_collection_finish(session):
+        with open(COLLECT, "w") as f:
+            for item in session.items:
+                marks = sorted({m.name for m in item.iter_markers()})
+                f.write(json.dumps({"id": item.nodeid, "marks": marks}) + "\n")
 
 
 if SELECT:

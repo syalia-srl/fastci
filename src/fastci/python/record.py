@@ -31,7 +31,14 @@ def git(root: str, *args: str) -> str:
     ).stdout.strip()
 
 
-def record(pytest_args: list[str], out: str, sources: list[str], root: str) -> int:
+def record(
+    pytest_args: list[str],
+    out: str,
+    sources: list[str],
+    root: str,
+    python: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
     """Run pytest with recording on, write the map to ``out``, return pytest's exit code."""
     root = os.path.realpath(root)
     work = tempfile.mkdtemp(prefix="fastci-")
@@ -40,11 +47,11 @@ def record(pytest_args: list[str], out: str, sources: list[str], root: str) -> i
     rc = os.path.join(work, "coveragerc")
     source = ",".join(os.path.join(root, s) for s in sources)
     Path(rc).write_text(COVERAGERC.format(source=source, data=data))
-    env = dict(os.environ)
+    env = dict(env or os.environ)
     env.update(FASTCI_RECORD=work, FASTCI_ROOT=root, FASTCI_CTX="")
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [SUBPROCESS_DIR, env.get("PYTHONPATH")]))
     cmd = [
-        sys.executable,
+        *(python or [sys.executable]),
         "-m",
         "pytest",
         "-p",
