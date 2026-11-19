@@ -271,7 +271,10 @@ pre{overflow-x:auto}
   <a href="#setup">fastci setup</a>
   <a href="#config">Configuration</a>
   <a href="#migration">From testmap to fastci</a>
-  <a href="#languages">Other languages</a>
+  <a href="#languages">Adapters</a>
+  <a href="#js">JavaScript and TypeScript</a>
+  <a href="#e2e">Browser and end-to-end</a>
+  <a href="#agents">Migrating with an agent</a>
   <a href="#delivery">Delivery</a>
   <a href="#testing">Testing</a>
   <a href="#nongoals">Non-goals and open questions</a>
@@ -280,7 +283,7 @@ pre{overflow-x:auto}
 <main>
 <h1>fastci: one command that runs the least testing each case needs</h1>
 <div class="meta"><span>docs/superpowers/specs/2026-11-19-fastci-design.html</span><span>·</span><span>draft</span></div>
-<p class="lede">A repository's CI becomes one command, <code>fastci</code>, run the same way on a laptop, in a pull request, on main and on a release branch. It works out which of the four cases it is in, runs the cheapest checks first, stops at the first failure, and runs only the tests the change can break. <code>fastci setup</code> reads a repository and proposes the configuration and the workflow. testmap grows into it and becomes its Python test picker.</p>
+<p class="lede">A repository's testing becomes one command, <code>fastci</code>, run the same way on a laptop, in a pull request, on main and on a release branch. It works out which of the four cases it is in, runs the cheapest checks first, stops at the first failure, and runs only the tests the change can break, in Python and JavaScript/TypeScript from the start, browser and end-to-end suites included. Other languages and runners plug in as adapters. <code>fastci setup</code> reads a repository and proposes the configuration and the workflow, and <code>fastci guide</code> tells an agent how to migrate a repository's CI to it. testmap grows into it and becomes its Python adapter.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
 <div class="trio">
@@ -309,10 +312,16 @@ pre{overflow-x:auto}
 <thead><tr><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
 <tbody>
 <tr><td>What it is</td><td>A command that turns the tiered testing practice into rules a machine runs, opinionated, with every default configurable</td><td class="why"><span class="who">maintainer</span> The practice existed only as prose, and each repository wired it by hand and drifted.</td></tr>
+<tr><td>Scope</td><td>Testing only: checks and tests, failing as early as each case allows. No build, publish or deploy</td><td class="why"><span class="who">maintainer</span> Delivery stays in each repository's release workflow.</td></tr>
+<tr><td>Generality</td><td>No dependency on any particular repository's tools. A repository's own checks enter as stages that are plain commands</td><td class="why"><span class="who">maintainer</span> It must fit any repository, and accommodate the house tools without knowing them.</td></tr>
+<tr><td>Implementation language</td><td>The core in Python; each language is an adapter that speaks JSON to it, written in whatever suits that language</td><td class="why"><span class="who">maintainer</span> The Python recorder must run inside Python anyway (coverage.py, the subprocess hook), so a core in Go would still ship a Python package. <code>uvx fastci</code> is one line on any runner.</td></tr>
+<tr><td>Languages at first</td><td>Python and JavaScript/TypeScript, including browser and end-to-end suites</td><td class="why"><span class="who">maintainer</span> Those are what the repositories it serves first are written in.</td></tr>
+<tr><td>Migration by agents</td><td><code>fastci guide</code> prints the migration procedure; <code>fastci setup --check</code> lists what the old CI did that the new one does not</td><td class="why"><span class="who">maintainer</span> An agent should be able to move a repository's CI to fastci in one sitting.</td></tr>
 <tr><td>What it optimises</td><td>The least testing each case needs, cheapest first, failing fast</td><td class="why"><span class="who">maintainer</span> Pull requests are slow, and agents run whole suites on laptops without a GPU until the RAM is gone.</td></tr>
 <tr><td>testmap</td><td>Grows into fastci: same repository, renamed; its picking becomes <code>fastci.python</code></td><td class="why"><span class="who">maintainer</span> One package, one config block, one release. Its adopters are a day old and few.</td></tr>
 <tr><td>Setup</td><td><code>fastci setup</code> proposes, <code>--write</code> applies</td><td class="why"><span class="who">maintainer</span> Adopting it in a repository should be one command.</td></tr>
-<tr><td>Languages</td><td>Python first; others through path suites, then pickers of their own</td><td class="why"><span class="who">maintainer</span> Most repositories here are Python.</td></tr>
+<tr><td>Suites that need an environment</td><td>A suite declares what it needs (a browser, a running stack, a secret, a GPU) and runs only where that is met; elsewhere it is reported as skipped and left to the tier that has it</td><td class="why">A laptop or a hosted runner without the stack must not fail, and must not hide that the suite did not run.</td></tr>
+<tr><td>Which end-to-end tests a change needs</td><td>A map recorded per test from browser coverage and server coverage; declared <code>covers</code> paths until a map exists</td><td class="why">The same rule as for unit tests: pick what ran the changed code. Hand-kept path maps drift.</td></tr>
 <tr><td>Name</td><td><code>fastci</code>, published on PyPI</td><td class="why">Free on PyPI on 2026-11-19; says what it is for. <code>testmap</code> is taken on PyPI.</td></tr>
 <tr><td>CI service</td><td>GitHub Actions only in 0.x; the runner is a plain command</td><td class="why">Every repository here uses it. The command itself has no Actions dependency except reading its environment variables and fetching the map.</td></tr>
 <tr><td>A laptop with no map</td><td>Run the always group and the tests in changed test files, and say that main runs the rest</td><td class="why">Running everything is exactly what the laptop must not do.</td></tr>
@@ -345,7 +354,7 @@ pre{overflow-x:auto}
 <thead><tr><th>Case</th><th>How fastci knows</th><th>What runs</th><th>Target</th></tr></thead>
 <tbody>
 <tr><td>T0 laptop</td><td>no <code>CI</code> variable</td><td>format, lint and type checks; the always group; the picked tests against the merge-base with the default branch, working tree included. Capped, fail-fast, never slow, gpu, browser, e2e or bench</td><td>seconds</td></tr>
-<tr><td>T1 pull request</td><td><code>GITHUB_EVENT_NAME=pull_request</code>; base is <code>origin/$GITHUB_BASE_REF</code></td><td>the same stages; picked tests reported in full, not fail-fast. A class test (browser, e2e) runs only if the diff touches the paths its config names</td><td>5 min or less</td></tr>
+<tr><td>T1 pull request</td><td><code>GITHUB_EVENT_NAME=pull_request</code>; base is <code>origin/$GITHUB_BASE_REF</code></td><td>the same stages; picked tests reported in full, not fail-fast. A suite that needs an environment runs only if its map or its <code>covers</code> paths pick it and its requirements are met</td><td>5 min or less</td></tr>
 <tr><td>T2 main</td><td>push to the default branch</td><td>the checks, then the whole fast suite (every test without a release-only mark). The generated workflow records the map in a separate job that never gates</td><td>about 10 min</td></tr>
 <tr><td>T3 release</td><td>push to <code>release/**</code> or a <code>v*</code> tag</td><td>the T2 run, then the release-only classes: slow, gpu, browser, e2e, bench</td><td>as long as it takes</td></tr>
 </tbody>
@@ -360,6 +369,7 @@ pre{overflow-x:auto}
   <div class="files" id="files">
     <label><input type="checkbox" value="src/app/calc.py" checked> src/app/calc.py</label>
     <label><input type="checkbox" value="static/site.css"> static/site.css</label>
+    <label><input type="checkbox" value="web/editor.ts"> web/editor.ts</label>
     <label><input type="checkbox" value="tests/test_api.py"> tests/test_api.py</label>
     <label><input type="checkbox" value="uv.lock"> uv.lock</label>
     <label><input type="checkbox" value="README.md"> README.md</label>
@@ -368,7 +378,7 @@ pre{overflow-x:auto}
 </div>
 
 <h2 id="stages"><span class="n">05</span>Stages and their order</h2>
-<p>A stage is a name, a command and the tiers it runs in. Stages run in a fixed order from cheapest to dearest, and the first red one ends the run with its exit code. For a Python repository the defaults are those <code>fastci setup</code> finds configured:</p>
+<p>A stage is a name, a command and the tiers it runs in. Stages run in a fixed order from cheapest to dearest, and the first red one ends the run with its exit code. Each adapter contributes its defaults; for a Python repository they are those <code>fastci setup</code> finds configured (the JS/TS ones are in <a href="#js">section 13</a>):</p>
 <table class="tbl">
 <thead><tr><th>Stage</th><th>Default command</th><th>When it is included</th></tr></thead>
 <tbody>
@@ -378,9 +388,11 @@ pre{overflow-x:auto}
 <tr><td>types</td><td><code>ty check</code>, <code>mypy</code> or <code>pyright</code>, whichever is configured</td><td>one of them is configured</td></tr>
 <tr><td>always</td><td>pytest on the tests marked <code>always</code></td><td>any exist</td></tr>
 <tr><td>tests</td><td>pytest on the picked tests, fastest first by the map's durations</td><td>T0, T1; the whole fast suite in T2 and T3</td></tr>
+<tr><td>suites</td><td>the suites that need an environment (<a href="#e2e">section 14</a>), picked the same way</td><td>where their requirements are met</td></tr>
 <tr><td>release</td><td>pytest on the release-only classes</td><td>T3</td></tr>
 </tbody>
 </table>
+<p>In a repository with several languages the cheap stages of every language run before any test stage, so a lint error in TypeScript ends the run before the Python tests start.</p>
 <p>A stage that has nothing to do (no changed Python file for lint, no picked test) is skipped and says so. A repository adds its own stages in the config, each with an order key and its tiers.</p>
 
 <h2 id="picking"><span class="n">06</span>Picking tests</h2>
@@ -432,7 +444,7 @@ default-branch = "main"
 
 [tool.fastci.stages]           # override or add; "" turns a stage off
 types = "mypy src"
-docs  = { run = "scriptorium check", tiers = ["T1", "T2"], after = "lint" }
+docs  = { run = "make docs-check", tiers = ["T1", "T2"], after = "lint" }
 
 [tool.fastci.tests]
 args         = ["-q"]
@@ -457,43 +469,100 @@ fail-fast = true</pre>
   <li>Each repository that adopted testmap moves to the new workflow in a PR of its own once 0.2.0 is out, and fastci runs its own CI through itself.</li>
 </ul>
 
-<h2 id="languages"><span class="n">12</span>Other languages</h2>
-<p>Until a language has a picker, a repository lists suites by path, as one repository here does by hand today:</p>
+<h2 id="languages"><span class="n">12</span>Adapters</h2>
+<p>The core knows git, tiers, stages, caps and the map file. Everything about a language or a test runner is in an adapter: a program fastci runs with a JSON request on stdin and a JSON answer on stdout. The Python adapter is in-process; the JS/TS one is a Node script shipped inside the package; a third party can add one as any executable named in config.</p>
+<table class="tbl">
+<thead><tr><th>Call</th><th>Gets</th><th>Returns</th></tr></thead>
+<tbody>
+<tr><td><code>detect</code></td><td>the repository root</td><td>the projects it found (root, runner, tools present) and the stages it proposes</td></tr>
+<tr><td><code>record</code></td><td>a project and an output path</td><td>a map: per test, the files and lines it ran and the files it read, and its duration and peak memory</td></tr>
+<tr><td><code>run</code></td><td>a project and a list of test ids, or "all"</td><td>the runner's exit code, with the runner's own output passed through</td></tr>
+<tr><td><code>tests</code></td><td>a project</td><td>every test id with its marks, for the class rules and for setup</td></tr>
+</tbody>
+</table>
+<p>Picking stays in the core: every adapter's map has the same shape, so the rules (changed lines, files read, <code>full</code> paths, the always group) are written once. A language with no recorder yet uses path suites:</p>
 <pre>[[suite]]
-name  = "web"
-paths = ["apps/web/**"]
-run   = "npm --prefix apps/web test"
-lint  = "npm --prefix apps/web run lint"</pre>
-<p>A pull request runs the suites whose paths the diff touches, main runs every suite, and a changed shared path (a lockfile at the root, the workflow) runs them all. Setup proposes suites from the <code>package.json</code>, <code>go.mod</code> and <code>Cargo.toml</code> files it finds. Pickers of their own come after: Go first, since <code>go list -deps</code> gives the package graph without recording anything.</p>
+name   = "bridge"
+paths  = ["apps/bridge/**"]
+run    = "go test ./apps/bridge/..."
+checks = ["gofmt -l apps/bridge", "go vet ./apps/bridge/..."]</pre>
+<p>A pull request runs the suites whose paths the diff touches, main runs every suite, and a changed path no suite and no adapter claims runs everything, unless it matches <code>ignore</code> (docs, Markdown). A suite can add edges for the files it reads outside its own paths (<code>reads = ["apps/shell/static/**"]</code>). Go is the next adapter, since <code>go list -deps</code> gives the package graph without recording.</p>
 
-<h2 id="delivery"><span class="n">13</span>Delivery</h2>
+<h2 id="js"><span class="n">13</span>JavaScript and TypeScript</h2>
+<p>The JS/TS adapter finds every <code>package.json</code> outside <code>node_modules</code> and reads its scripts and dev dependencies.</p>
+<table class="tbl">
+<thead><tr><th>Stage</th><th>Default</th><th>When</th></tr></thead>
+<tbody>
+<tr><td>lock</td><td><code>npm ci --dry-run</code>, <code>pnpm install --frozen-lockfile --lockfile-only</code></td><td>a lockfile exists</td></tr>
+<tr><td>format</td><td><code>prettier --check</code> or <code>biome format</code></td><td>configured</td></tr>
+<tr><td>lint</td><td><code>eslint</code> or <code>biome lint</code> on the changed files</td><td>configured</td></tr>
+<tr><td>types</td><td><code>tsc --noEmit</code></td><td>a <code>tsconfig.json</code></td></tr>
+<tr><td>tests</td><td><code>node --test</code>, vitest or jest on the picked files</td><td>whichever the project uses</td></tr>
+</tbody>
+</table>
+<p>Recording runs each test file in its own process with <code>NODE_V8_COVERAGE</code> set, which every Node runner honours without a plugin, and maps source maps back to the <code>.ts</code> files. The map is per test file, not per test: coarser than Python's, enough to skip the files a change cannot reach. Per-test maps for vitest and jest can come later through their reporters.</p>
+
+<h2 id="e2e"><span class="n">14</span>Browser and end-to-end suites</h2>
+<p>These tests drive a running product. They need things a unit test does not, and they are the dearest tests, so the two questions are where they can run and which of them a change needs.</p>
+<pre>[[suite]]
+name     = "e2e"
+runner   = "pytest"                  # or "playwright"
+root     = "e2e"
+requires = ["browser", "stack", "secret:E2E_ADMIN_PASS"]
+up       = "make up"                 # optional: how to start what it needs
+down     = "make down"
+url      = "env:E2E_BASE_URL"        # or a stack someone else keeps running
+covers   = ["apps/notes/**", "apps/shell/static/**"]   # until a map exists
+tiers    = ["T1", "T3"]</pre>
+<ul>
+  <li><b>Where:</b> fastci checks each requirement (<code>browser</code>: a Chromium it can launch; <code>stack</code>: <code>up</code> succeeded or <code>url</code> answers; <code>secret:X</code>: the variable is set; <code>gpu</code>: a GPU is found). A suite whose requirements are not met is reported as <code>skipped: needs stack</code>, never as passed, and the tiers that have it run it. On a laptop the default is not to start a stack; <code>fastci --with e2e</code> asks for it.</li>
+  <li><b>Which:</b> the map for these suites is recorded on main or on the release branch, wherever the suite runs whole. Per test it holds what the browser ran (Chromium's JS coverage for the page, which Playwright and CDP both expose, mapped to source files through source maps) and what the server ran during that test. For a Python server, fastci sets a test id header on the browser's requests and the server's coverage switches context on it, through a small middleware the Python adapter ships for ASGI and WSGI. Static files the server sent count as read by the test.</li>
+  <li>A pull request then runs the flows that loaded or executed what it changed, and the rest wait for the full run. Without a map, <code>covers</code> decides at suite level, and a path no suite covers sends every suite that needs an environment to its next tier, never to every pull request.</li>
+</ul>
+
+<h2 id="agents"><span class="n">15</span>Migrating a repository with an agent</h2>
+<ol>
+  <li><code>fastci guide</code> prints the procedure, embedded in the package so it matches the installed version: what to read, what to keep, how to check.</li>
+  <li><code>fastci setup --diff</code> proposes the config, the workflow and the marks.</li>
+  <li><code>fastci setup --check</code> reads the old workflows step by step and lists each step the new setup does not cover (a Go job, an Android build, a custom script), so the agent turns each into a stage or a suite or names why it is dropped.</li>
+  <li><code>fastci plan --tier T1 --base HEAD~5</code> on a few recent changes shows what each would have run; the agent puts that and a passing run in the pull request as evidence.</li>
+</ol>
+
+<h2 id="delivery"><span class="n">16</span>Delivery</h2>
 <ol>
   <li><b>Rename.</b> Repository, package, <code>fastci map …</code> commands, the <code>[tool.testmap]</code> fallback. Released as 0.2.0 on PyPI.</li>
-  <li><b>The runner for Python.</b> Tier detection, stages, order, fail-fast, <code>fastci plan</code> with reasons.</li>
+  <li><b>The core and the Python adapter.</b> The adapter protocol, tier detection, stages, order, fail-fast, <code>fastci plan</code> with reasons.</li>
   <li><b>Laptop caps.</b> Workers, the memory scope, nice, class exclusion.</li>
-  <li><b>Setup.</b> Detection, the config block, the workflow, the mark proposals, <code>--diff</code> and <code>--write</code>.</li>
-  <li><b>Adoption.</b> fastci itself and each repository that uses testmap. The testing know-how changes to say "run <code>fastci</code>".</li>
-  <li><b>Path suites</b> for other languages, adopted in the monorepo that keeps its own path map.</li>
+  <li><b>Setup and the guide.</b> Detection, the config block, the workflow, the mark proposals, <code>--diff</code>, <code>--write</code>, <code>--check</code>, <code>fastci guide</code>.</li>
+  <li><b>Adoption in Python repositories.</b> fastci itself and each repository that uses testmap.</li>
+  <li><b>The JS/TS adapter and path suites.</b> Adopted in a monorepo with Python apps, a TypeScript Playwright suite, Go and Android, which keeps its own path map today.</li>
+  <li><b>Suites that need an environment.</b> Requirements, <code>up</code>/<code>down</code>, <code>covers</code>.</li>
+  <li><b>The end-to-end map.</b> Browser coverage, the server middleware, picking flows in pull requests.</li>
 </ol>
 <p>After these: <code>fastci check</code> (#1), the book (#2), phase-aware maps (#3).</p>
 
-<h2 id="testing"><span class="n">14</span>Testing</h2>
+<h2 id="testing"><span class="n">17</span>Testing</h2>
 <ul>
   <li>Tier detection: a table of environment variables against the expected tier and base.</li>
   <li>Plans: fixture repositories (the existing sample, a bare pytest one, one with ruff and ty, one with an old workflow, a JS-and-Python one) checked against expected plans, including the reasons.</li>
   <li>Caps: the worker formula and the scope command built from a fake <code>/proc/meminfo</code> and CPU count; one real run on Linux that the cap kills on purpose.</li>
-  <li>Setup: <code>--diff</code> output against golden files per fixture; <code>--write</code> twice changes nothing the second time.</li>
+  <li>Setup: <code>--diff</code> output against golden files per fixture; <code>--write</code> twice changes nothing the second time; <code>--check</code> names every step of a fixture's old workflow that the new one drops.</li>
+  <li>Adapters: a contract test that runs every adapter's four calls on its fixture project and validates the JSON. The JS/TS fixture has a <code>node --test</code> project and a vitest one, each with a TypeScript source behind a source map.</li>
+  <li>Requirements: a suite with an unmet requirement is reported as skipped and the run's exit code says nothing passed it.</li>
+  <li>The end-to-end map: a fixture app (a small ASGI server and one page of JS) with two Playwright flows that load different scripts; a change to one script picks one flow.</li>
   <li>testmap's own tests move over unchanged and must stay green.</li>
   <li>The real check is a pull request in an adopting repository: its CI time before and after, and no failure that main catches and the PR missed.</li>
 </ul>
 
-<h2 id="nongoals"><span class="n">15</span>Non-goals and open questions</h2>
+<h2 id="nongoals"><span class="n">18</span>Non-goals and open questions</h2>
 <ul>
   <li>Not a CI service and not a replacement for GitHub Actions: it is the command a workflow calls.</li>
   <li>No moving GPU tests to another machine. <code>gpu</code> tests run where a GPU is found or on a GPU runner.</li>
   <li>No memory caps on macOS or Windows in 0.x.</li>
+  <li>No build, publish or deploy.</li>
+  <li>Not tied to any repository's own tools; those are stages the repository declares.</li>
 </ul>
-<p><b>Open:</b> does fastci also do the delivery half of CI/CD, building and publishing a package or deploying on a tag? The proposal is no for 0.x: T3 runs the release tests and publishing stays in each repository's release workflow.</p>
+<p><b>Open:</b> a server that runs inside a container during end-to-end tests needs the coverage data and the middleware inside the image. The first version supports servers fastci starts on the host; containers wait until a repository needs them, and the suite falls back to <code>covers</code>.</p>
 </main>
 </div>
 
@@ -504,30 +573,35 @@ const MAP = {
   "src/app/calc.py": ["tests/test_calc.py::test_add", "tests/test_calc.py::test_div"],
   "static/site.css": ["tests/test_css.py::test_tokens", "tests/test_ui.py::test_page [browser]"],
   "tests/test_api.py": ["tests/test_api.py (changed test file)"],
+  "web/editor.ts": ["web/editor.test.ts", "e2e/test_notes.py::test_create_note [e2e]"],
 };
 const ALWAYS = ["tests/test_stub_sync.py::test_stub [always]"];
 let tier = "T0";
 function plan() {
   const files = [...document.querySelectorAll("#files input:checked")].map((i) => i.value);
-  const py = files.some((f) => f.endsWith(".py"));
+  const py = files.some((f) => /\.(py|ts)$/.test(f));
   const out = [`tier ${tier} · ${{T0: "laptop, base = merge-base with origin/main", T1: "pull request, base = origin/main", T2: "push to main", T3: "release branch"}[tier]}`, ""];
   let n = 1;
   const step = (s) => out.push(`${n++}. ${s}`);
   if (files.includes("uv.lock")) step("lock      uv lock --check");
-  step(py || tier >= "T2" ? "format    ruff format --check" : "format    skipped: no Python file changed");
-  step(py || tier >= "T2" ? "lint      ruff check" : "lint      skipped: no Python file changed");
-  step(py || tier >= "T2" ? "types     ty check" : "types     skipped: no Python file changed");
+  step(py || tier >= "T2" ? "format    ruff format --check" : "format    skipped: no source file changed");
+  step(py || tier >= "T2" ? "lint      ruff check" : "lint      skipped: no source file changed");
+  step(py || tier >= "T2" ? "types     ty check, tsc --noEmit" : "types     skipped: no source file changed");
   step("always    " + ALWAYS.join(", "));
   if (tier >= "T2") step("tests     the whole fast suite (release-only classes excluded)");
   else if (files.includes("uv.lock")) step("tests     every fast test: uv.lock changed" + (tier === "T0" ? " (capped: 3 workers, 50% memory)" : ""));
   else {
     let picked = files.flatMap((f) => MAP[f] || []);
     const why = files.filter((f) => !MAP[f]).map((f) => `${f} picks nothing`);
-    if (tier === "T0") { const b = picked.filter((t) => t.includes("[browser]")); picked = picked.filter((t) => !t.includes("[browser]")); if (b.length) why.push(`${b.length} browser test left to the pull request`); }
+    const env = picked.filter((t) => /\[(browser|e2e)\]/.test(t));
+    picked = picked.filter((t) => !env.includes(t));
+    if (env.length && tier === "T0") why.push(`skipped ${env.length}: needs browser, stack`);
     step("tests     " + (picked.length ? picked.join(", ") : "nothing to run") + (tier === "T0" ? " · fail-fast" : ""));
     if (why.length) out.push("          " + why.join("; "));
+    if (env.length && tier === "T1") step("suites    " + env.join(", ") + " · runner has browser and stack");
   }
-  if (tier === "T3") step("release   slow, gpu, browser, e2e, bench");
+  if (tier >= "T2") step("suites    e2e, whole" + (tier === "T2" ? "; records its map" : ""));
+  if (tier === "T3") step("release   slow, gpu, browser, bench");
   if (tier === "T2") out.push("", "map job   records and uploads the map; never gates");
   $("plan").textContent = out.join("\n");
 }
