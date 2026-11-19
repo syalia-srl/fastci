@@ -64,6 +64,7 @@ def record(
     ]
     code = subprocess.run(cmd, cwd=root, env=env).returncode
     tm = build(work, data, root)
+    tm.peak_rss = peak_rss(pytest_args)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tm.save(out)
     print(
@@ -142,6 +143,21 @@ def build(work: str, data: str, root: str) -> TestMap:
         files=files,
         reads=reads,
     )
+
+
+def peak_rss(pytest_args: list[str]) -> int:
+    """Peak memory of one pytest worker in the run that just ended, in bytes."""
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
+    workers = 1
+    for i, a in enumerate(pytest_args):
+        n = a[2:] if a.startswith("-n") and len(a) > 2 else None
+        if a == "-n" and i + 1 < len(pytest_args):
+            n = pytest_args[i + 1]
+        if n and n.isdigit():
+            workers = max(1, int(n))
+    return peak // workers
 
 
 def default_sources(root: str) -> list[str]:

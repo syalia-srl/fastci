@@ -133,3 +133,9 @@ def test_fix_rewrites_then_checks(tmp_path, monkeypatch):
     monkeypatch.delenv("CI", raising=False)
     assert cli.main(["fix"]) == 0
     assert (tmp_path / "a.py").read_text() == "x = 1\n"
+
+
+def test_a_run_killed_by_the_cap_names_the_setting(capsys):
+    note = "the run hit the memory cap of 4.0 GiB; raise [tool.fastci.local] memory"
+    assert run([tests_step()], FakeAdapter(code=137), fail_fast_tests=False, cap_note=note) == 137
+    assert note in capsys.readouterr().err

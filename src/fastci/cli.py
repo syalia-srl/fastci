@@ -50,8 +50,8 @@ def _pick(args):
 
 def _context(args):
     import dataclasses
-    import shutil
 
+    from . import local
     from .config import load
     from .tier import detect
 
@@ -60,19 +60,22 @@ def _context(args):
     ctx = detect(os.environ, cfg.default_branch, args.tier)
     if args.base and ctx.tier in ("T0", "T1"):
         ctx = dataclasses.replace(ctx, base=args.base)
-    return root, cfg, ctx, shutil.which("nvidia-smi") is not None
+    return root, cfg, ctx, local.has_gpu()
 
 
 def _plan(args) -> int:
-    from .plan import build, gather, render
+    from .plan import render
 
-    root, cfg, ctx, gpu = _context(args)
-    projects, changed, picks, maps = gather(root, ctx, cfg, os.path.join(root, args.map))
-    print(render(ctx, build(ctx, cfg, root, projects, changed, picks, maps, gpu)))
+    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    print(render(ctx, steps))
+    if caps["line"]:
+        print(caps["line"])
     return 0
 
 
 def _prepare(args):
+    import dataclasses
+
     from .execute import ensure_map, repo_of
     from .plan import build, gather
 
@@ -82,15 +85,59 @@ def _prepare(args):
         map_path = ensure_map(root, ctx, repo_of(root), cfg.default_branch) or map_path
     projects, changed, picks, maps = gather(root, ctx, cfg, map_path)
     steps = build(ctx, cfg, root, projects, changed, picks, maps, gpu)
-    return root, cfg, ctx, projects, steps
+    caps = _caps(cfg, ctx, projects, maps)
+    if caps["workers"]:
+        n = ["-n", str(caps["workers"])]
+        steps = [
+            dataclasses.replace(s, command=[*s.command, *n])
+            if s.action == "run" and s.stage in ("tests", "release")
+            else s
+            for s in steps
+        ]
+    return root, cfg, ctx, projects, steps, caps
+
+
+def _caps(cfg, ctx, projects, maps) -> dict:
+    """On a laptop: pytest workers, the memory cap and the wrapper that applies them."""
+    from . import local
+
+    none = {"workers": 0, "wrap": lambda a: a, "note": None, "line": None}
+    if ctx.tier != "T0":
+        return none
+    avail = local.mem_available()
+    systemd = local.has_systemd_user()
+    share = cfg.local.memory
+    workers = 0
+    if any("xdist" in p.tools for p in projects):
+        peak = max((m.peak_rss for m in maps.values() if m), default=0) or local.GIB
+        workers = cfg.local.workers or (
+            local.workers(os.cpu_count() or 2, avail, share, peak) if avail else 1
+        )
+    cap = f"{avail * share / local.GIB:.1f} GiB" if avail and systemd else None
+    line = f"laptop: {workers or 'no'} pytest workers, " + (
+        f"memory capped at {cap} with systemd-run, nice 10"
+        if cap
+        else "no memory cap (no systemd user session), nice 10"
+    )
+    return {
+        "workers": workers,
+        "wrap": lambda a: local.wrap(a, avail, share, systemd),
+        "note": f"the run hit the memory cap of {cap}; raise [tool.fastci.local] memory"
+        " or lower workers"
+        if cap
+        else None,
+        "line": line,
+    }
 
 
 def _run(args) -> int:
     from .adapter import adapters
     from .execute import execute, say
 
-    root, cfg, ctx, projects, steps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps = _prepare(args)
     say(ctx.reason)
+    if caps["line"]:
+        say(caps["line"])
     if not steps:
         say("nothing to check here: no project with checks or tests was found")
         return 0
@@ -100,6 +147,8 @@ def _run(args) -> int:
         {a.name: a for a in adapters()},
         {p.root: p for p in projects},
         fail_fast_tests=ctx.tier == "T0" and cfg.local.fail_fast,
+        wrap=caps["wrap"],
+        cap_note=caps["note"],
     )
 
 
@@ -110,7 +159,7 @@ def _fix(args) -> int:
     from .execute import execute, say
 
     args.tier = "T0"
-    root, cfg, ctx, projects, steps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps = _prepare(args)
     by_root = {p.root: p for p in projects}
     for s in steps:
         if s.action != "run":

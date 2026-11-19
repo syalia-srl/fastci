@@ -14,7 +14,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-VERSION = 1
+VERSION = 2
 
 
 def line_hash(text: str) -> str:
@@ -87,6 +87,7 @@ class TestMap:
     always: set[int]
     files: dict[str, FileEntry]
     reads: dict[str, set[int]]
+    peak_rss: int = 0  # bytes per pytest worker while recording; 0 when unknown
 
     def ids(self, idx) -> set[str]:
         return {self.tests[i] for i in idx}
@@ -107,6 +108,7 @@ class TestMap:
                 for p, e in self.files.items()
             },
             "reads": {p: sorted(i) for p, i in self.reads.items()},
+            "peak_rss": self.peak_rss,
         }
         with gzip.open(path, "wt") as f:
             json.dump(data, f, separators=(",", ":"))
@@ -115,7 +117,7 @@ class TestMap:
     def load(cls, path: str) -> TestMap:
         with gzip.open(path, "rt") as f:
             data = json.load(f)
-        if data.get("version") != VERSION:
+        if data.get("version") not in (1, VERSION):
             raise ValueError(f"map version {data.get('version')} is not {VERSION}")
         files = {
             p: FileEntry(
@@ -132,4 +134,5 @@ class TestMap:
             always=set(data["always"]),
             files=files,
             reads={p: set(i) for p, i in data["reads"].items()},
+            peak_rss=int(data.get("peak_rss", 0)),
         )

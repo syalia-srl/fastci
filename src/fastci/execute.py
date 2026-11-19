@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 from . import fetch
 from .adapter import Adapter, Project
+from .local import killed_by_cap
 from .plan import Step
 from .tier import Context
 
@@ -28,6 +29,7 @@ def execute(
     projects: dict[str, Project],
     fail_fast_tests: bool,
     wrap: Callable[[list[str]], list[str]] = lambda a: a,
+    cap_note: str | None = None,
 ) -> int:
     ran = skipped = 0
     for i, s in enumerate(steps):
@@ -49,6 +51,8 @@ def execute(
             rest = [t.stage for t in steps[i + 1 :] if t.action == "run"]
             tail = f"; later stages did not run: {', '.join(rest)}" if rest else ""
             say(f"{s.stage} failed (exit {code}){tail}")
+            if cap_note and killed_by_cap(code):
+                say(cap_note)
             return code
         ran += 1
     say(f"{ran} stages passed, {skipped} skipped")
