@@ -17,8 +17,13 @@ def sh(cwd, *cmd):
 
 @pytest.fixture(autouse=True)
 def _no_outer_fastci_run(monkeypatch):
-    """When fastci runs this suite, its own variables must not reach the runs tests start."""
+    """When fastci runs this suite, its own variables must not reach the runs tests start,
+    nor the CI's: with GITHUB_REPOSITORY and a token a test would fetch this repo's map."""
     for k in ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"):
+        monkeypatch.delenv(k, raising=False)
+    github = ("GITHUB_REPOSITORY", "GH_TOKEN", "GITHUB_TOKEN")
+    github += ("GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_BASE_REF")
+    for k in github:
         monkeypatch.delenv(k, raising=False)
 
 
