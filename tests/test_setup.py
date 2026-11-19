@@ -84,3 +84,32 @@ def test_setup_command_prints_then_writes(tmp_path, monkeypatch, capsys):
     assert not (root / ".github").exists()
     assert cli.main(["setup", "--write"]) == 0
     assert (root / ".github" / "workflows" / "fastci.yml").exists()
+
+
+def test_check_lists_uncovered_steps(tmp_path):
+    [gap] = setup.check(str(copy(tmp_path, "setup-full")))
+    assert gap.workflow == ".github/workflows/ci.yml" and gap.job == "test"
+    assert gap.step == "docs" and gap.run == "make docs"
+
+
+def test_check_respects_configured_stage(tmp_path):
+    root = copy(tmp_path, "setup-full")
+    pp = root / "pyproject.toml"
+    pp.write_text(pp.read_text() + '\n[tool.fastci.stages]\ndocs = "make docs"\n')
+    assert setup.check(str(root)) == []
+
+
+def test_check_command_exits_1_on_gaps(tmp_path, monkeypatch, capsys):
+    from fastci import cli
+
+    monkeypatch.chdir(copy(tmp_path, "setup-full"))
+    assert cli.main(["setup", "--check"]) == 1
+    assert "make docs" in capsys.readouterr().out
+
+
+def test_guide_prints(capsys):
+    from fastci import cli
+
+    assert cli.main(["guide"]) == 0
+    out = capsys.readouterr().out
+    assert "fastci setup --check" in out and "T3" in out

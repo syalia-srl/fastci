@@ -223,6 +223,44 @@ def _workflows(root: Path, stages: list[str]) -> list[Change]:
     return out
 
 
+@dataclass(frozen=True)
+class Gap:
+    workflow: str  # path
+    job: str
+    step: str  # the step's name, or its run line's first 60 characters
+    run: str
+
+
+def _job(lines: list[str], at: int) -> str:
+    for line in reversed(lines[:at]):
+        m = re.match(r"  ([\w-]+):\s*$", line)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def check(root: str) -> list[Gap]:
+    """Each run step of the old workflows that fastci does not cover."""
+    r = Path(root)
+    stages = [s.run for s in load(root).stages.values() if s.run]
+    gaps = []
+    for wf in sorted((r / ".github" / "workflows").glob("*.y*ml")):
+        rel = wf.relative_to(r).as_posix()
+        if rel == WORKFLOW:
+            continue
+        text = wf.read_text()
+        lines = text.splitlines()
+        for start, _, block in _steps(text):
+            cmds = run_lines(block)
+            if not cmds or covered(cmds, stages):
+                continue
+            name = re.search(r"\bname:\s*(.+)", block)
+            run = "; ".join(cmds)
+            label = name.group(1).strip() if name else run[:60]
+            gaps.append(Gap(rel, _job(lines, start), label, run))
+    return gaps
+
+
 def propose(root: str, from_map: str | None = None) -> list[Change]:
     r = Path(root)
     cfg = load(root)

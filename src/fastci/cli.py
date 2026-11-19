@@ -176,6 +176,12 @@ def _setup(args) -> int:
     from . import setup
 
     root = _root()
+    if args.check:
+        gaps = setup.check(root)
+        for g in gaps:
+            print(f"{g.workflow} · {g.job} · {g.step}: {g.run}")
+        print(f"{len(gaps)} steps not covered" if gaps else "every step is covered")
+        return 1 if gaps else 0
     changes = setup.propose(root, args.from_map)
     print(setup.detect_summary(root))
     if args.diff:
@@ -232,6 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--diff", action="store_true", help="show each change as a diff")
     st.add_argument("--write", action="store_true", help="apply the changes")
     st.add_argument("--from-map", help="also mark tests slower than slow-seconds in this map")
+    st.add_argument(
+        "--check", action="store_true", help="list old workflow steps fastci does not cover"
+    )
+    top.add_parser("guide", help="print how to move a repository's CI to fastci")
 
     args = parser.parse_args(own)
 
@@ -243,6 +253,11 @@ def main(argv: list[str] | None = None) -> int:
         return _fix(args)
     if args.top == "setup":
         return _setup(args)
+    if args.top == "guide":
+        from importlib.resources import files
+
+        print((files("fastci") / "guide.md").read_text(), end="")
+        return 0
 
     if args.cmd == "record":
         from .python.adapter import PythonAdapter
