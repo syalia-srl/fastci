@@ -4,7 +4,7 @@
 
 testmap is now fastci.
 
-- `fastci` runs, per tier (laptop, pull request, default branch, release), the
+- `fastci` runs, per tier (`local`, `pr`, `main`, `release`), the
   lock, format, lint and type checks and the tests a change can break, cheapest
   first, stopping at the first failure. `fastci plan` prints the plan and why.
 - On a laptop: pytest-xdist workers sized from free memory, the run capped with
@@ -14,6 +14,9 @@ testmap is now fastci.
 - Marks `always`, `slow`, `gpu`, `browser`, `e2e`, `bench`, registered by the
   plugin's pytest11 entry point.
 - Config in `[tool.fastci]` or `fastci.toml`; `[tool.testmap]` still read.
+  Each tier is a table under `[tool.fastci.tiers]`: change any key of a default
+  tier, or add your own.
+- Releases publish to PyPI.
 - The map is version 2 (records peak memory); version 1 maps still load.
 - Migration: `testmap record|pick|run|fetch` are `fastci map record|pick|run|fetch`;
   `testmap run` in CI becomes `fastci`. Maps uploaded as `testmap` are still fetched.
