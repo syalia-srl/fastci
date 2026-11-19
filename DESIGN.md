@@ -4,6 +4,25 @@ This file changes only when the architecture changes.
 
 ## Components
 
+The core knows git, tiers, stages, caps and the map file; everything about a
+language lives in an adapter (`fastci.adapter.Adapter`). The full design,
+including the adapters, suites and end-to-end maps still to come, is
+`docs/superpowers/specs/2026-11-19-fastci-design.html`.
+
+- **The tier** (`fastci.tier`) reads the CI environment: a laptop, a pull
+  request, a push to the default branch, or a release.
+- **The plan** (`fastci.plan`) orders the stages for that tier: every project's
+  checks, then the tests marked always, then the picked tests, then on a
+  release the release-only classes. Each step carries the reason it runs or is
+  skipped.
+- **Execution** (`fastci.execute`) runs the steps and stops at the first that
+  fails; on a laptop each command runs under the caps from `fastci.local`.
+- **Setup** (`fastci.setup`) reads a repository and proposes the config, the
+  workflow, the test marks and the trimmed old workflows; it never runs the suite.
+- **The Python adapter** (`fastci.python`) finds a project's tools and runs
+  pytest with the project's own Python, putting fastci on `PYTHONPATH` so the
+  plugin loads without being installed there.
+
 - **The plugin** (`fastci.python.plugin`) runs inside pytest. When recording, it puts
   each test's id where a child process can read it and notes every repository
   file a test opens, through Python's audit hook on `open`. When running, it
@@ -45,6 +64,9 @@ package yet.
 
 ## Non-goals
 
-- Test runners other than pytest, and languages other than Python.
-- Picking tests for code reached only through a non-Python process.
-- Replacing the full run on main.
+- Building, publishing or deploying: fastci only checks and tests.
+- Knowing any repository's own tools: those enter as stages, plain commands.
+- Picking tests for code reached only through a non-Python process (until the
+  end-to-end map).
+- Replacing the full run on the default branch.
+- Memory caps outside Linux with a systemd user session.

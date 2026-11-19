@@ -39,7 +39,7 @@ def test_tests_lists_ids_with_marks(tmp_path):
 
 def test_marks_are_registered(pytester):
     pytester.makepyfile("import pytest\n@pytest.mark.gpu\ndef test_a(): pass\n")
-    assert pytester.runpytest("--strict-markers").ret == 0
+    assert pytester.runpytest_subprocess("--strict-markers").ret == 0
 
 
 def test_selected_tests_run_in_the_select_order(pytester, monkeypatch):
@@ -50,3 +50,11 @@ def test_selected_tests_run_in_the_select_order(pytester, monkeypatch):
     r = pytester.runpytest_subprocess("-v", "-p", "fastci.python.plugin")
     out = r.stdout.str()
     assert out.index("test_2 PASSED") < out.index("test_1 PASSED")
+
+
+def test_env_drops_an_outer_runs_variables(monkeypatch):
+    for k in ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"):
+        monkeypatch.setenv(k, "outer")
+    env = PythonAdapter().env({"FASTCI_SELECT": "inner"})
+    assert env["FASTCI_SELECT"] == "inner"
+    assert not {"FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"} & set(env)

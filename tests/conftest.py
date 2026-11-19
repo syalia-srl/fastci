@@ -15,6 +15,13 @@ def sh(cwd, *cmd):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
+@pytest.fixture(autouse=True)
+def _no_outer_fastci_run(monkeypatch):
+    """When fastci runs this suite, its own variables must not reach the runs tests start."""
+    for k in ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"):
+        monkeypatch.delenv(k, raising=False)
+
+
 @pytest.fixture
 def sample(tmp_path):
     """A git repository holding the sample project, with one commit."""

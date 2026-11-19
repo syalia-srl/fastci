@@ -13,6 +13,7 @@ from pathlib import Path
 from ..adapter import Check, Project
 
 PY = ("**/*.py", "*.py", "pyproject.toml")
+OWN_VARS = ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX")
 # The directory holding the fastci package, so a project's own Python can import
 # the plugin without fastci being installed in that project's environment.
 FASTCI_PATH = str(Path(__file__).resolve().parents[2])
@@ -94,7 +95,8 @@ class PythonAdapter:
         return [Project("python", ".", tools, _checks(tools))]
 
     def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        env = dict(os.environ)
+        # Variables an outer fastci run set are not this run's.
+        env = {k: v for k, v in os.environ.items() if k not in OWN_VARS}
         env.update(extra or {})
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [FASTCI_PATH, env.get("PYTHONPATH")]))
         return env
