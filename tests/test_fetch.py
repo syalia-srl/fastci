@@ -43,7 +43,9 @@ def test_newest_artifact_from_the_branch(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(fetch, "_get", lambda url, token, follow=True: R(json.dumps(arts).encode()))
+    monkeypatch.setattr(
+        fetch, "_get", lambda url, token, follow=True, timeout=60: R(json.dumps(arts).encode())
+    )
     assert fetch.newest_artifact("o/r", "testmap", "main", "t")["id"] == 2
 
 

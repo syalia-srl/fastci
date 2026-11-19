@@ -102,10 +102,12 @@ def ensure_map(root: str, ctx: Context, repo: str | None, branch: str) -> str | 
     token = _token(ctx)
     if not token:
         return have
+    # On a laptop a dead network must not hold up the checks.
+    timeout = 5 if ctx.tier == "T0" else 60
     try:
-        art = fetch.newest_artifact(repo, "fastci", branch, token)
+        art = fetch.newest_artifact(repo, "fastci", branch, token, timeout=timeout)
         if art is None:
-            art = fetch.newest_artifact(repo, "testmap", branch, token)
+            art = fetch.newest_artifact(repo, "testmap", branch, token, timeout=timeout)
         if art is None:
             say(f"no map uploaded from {branch} in {repo} yet")
             return have

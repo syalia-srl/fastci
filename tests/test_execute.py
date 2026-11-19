@@ -86,7 +86,7 @@ def test_ensure_map_skips_download_when_sha_matches(monkeypatch, tmp_path):
     save_map(path, "abc")
     monkeypatch.setenv("GH_TOKEN", "t")
     art = {"workflow_run": {"head_sha": "abc"}, "archive_download_url": "u"}
-    monkeypatch.setattr(fetch, "newest_artifact", lambda *a: art)
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: art)
     monkeypatch.setattr(fetch, "_download", lambda *a: (_ for _ in ()).throw(AssertionError))
     assert ex.ensure_map(str(tmp_path), T1, "o/r", "main") == str(path)
 
@@ -94,7 +94,7 @@ def test_ensure_map_skips_download_when_sha_matches(monkeypatch, tmp_path):
 def test_ensure_map_downloads_a_newer_map(monkeypatch, tmp_path):
     monkeypatch.setenv("GH_TOKEN", "t")
     art = {"workflow_run": {"head_sha": "new"}, "archive_download_url": "u"}
-    monkeypatch.setattr(fetch, "newest_artifact", lambda *a: art)
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: art)
     monkeypatch.setattr(fetch, "_download", lambda url, token, out: save_map(out, "new"))
     path = ex.ensure_map(str(tmp_path), T1, "o/r", "main")
     with gzip.open(path) as f:
@@ -104,7 +104,7 @@ def test_ensure_map_downloads_a_newer_map(monkeypatch, tmp_path):
 def test_ensure_map_returns_none_offline(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("GH_TOKEN", "t")
 
-    def boom(*a):
+    def boom(*a, **k):
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(fetch, "newest_artifact", boom)
@@ -139,3 +139,12 @@ def test_a_run_killed_by_the_cap_names_the_setting(capsys):
     note = "the run hit the memory cap of 4.0 GiB; raise [tool.fastci.local] memory"
     assert run([tests_step()], FakeAdapter(code=137), fail_fast_tests=False, cap_note=note) == 137
     assert note in capsys.readouterr().err
+
+
+def test_a_laptop_gives_up_on_github_quickly(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setenv("GH_TOKEN", "t")
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, timeout=60: seen.append(timeout))
+    ex.ensure_map(str(tmp_path), Context("T0", "origin/main", False, "laptop"), "o/r", "main")
+    ex.ensure_map(str(tmp_path), T1, "o/r", "main")
+    assert seen[0] == 5 and seen[-1] == 60

@@ -21,7 +21,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _get(url: str, token: str, follow: bool = True):
+def _get(url: str, token: str, follow: bool = True, timeout: float = 60):
     req = urllib.request.Request(
         url,
         headers={
@@ -31,18 +31,21 @@ def _get(url: str, token: str, follow: bool = True):
         },
     )
     if follow:
-        return urllib.request.urlopen(req, timeout=60)
+        return urllib.request.urlopen(req, timeout=timeout)
     opener = urllib.request.build_opener(_NoRedirect)
     try:
-        return opener.open(req, timeout=60)
+        return opener.open(req, timeout=timeout)
     except urllib.error.HTTPError as e:
         if e.code in (301, 302, 303, 307, 308):
             return e
         raise
 
 
-def newest_artifact(repo: str, name: str, branch: str, token: str) -> dict | None:
-    with _get(f"{API}/repos/{repo}/actions/artifacts?name={name}&per_page=100", token) as r:
+def newest_artifact(
+    repo: str, name: str, branch: str, token: str, timeout: float = 60
+) -> dict | None:
+    url = f"{API}/repos/{repo}/actions/artifacts?name={name}&per_page=100"
+    with _get(url, token, timeout=timeout) as r:
         arts = json.load(r)["artifacts"]
     arts = [
         a
