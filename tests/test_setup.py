@@ -119,3 +119,17 @@ def test_workflows_without_pull_request_are_left_alone(tmp_path):
     root = str(copy(tmp_path, "setup-full"))
     assert all(c.path != ".github/workflows/release.yml" for c in setup.propose(root))
     assert all(g.workflow != ".github/workflows/release.yml" for g in setup.check(root))
+
+
+def test_marks_skip_what_pytest_does_not_collect(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\nnorecursedirs = ["fixtures"]\n'
+    )
+    for d in ("tests/fixtures/p/tests", "other"):
+        (tmp_path / d).mkdir(parents=True)
+    ui = "from playwright.sync_api import sync_playwright\n\n\ndef test_p():\n    pass\n"
+    (tmp_path / "tests/fixtures/p/tests/test_ui.py").write_text(ui)
+    (tmp_path / "other/test_ui.py").write_text(ui)
+    (tmp_path / "tests/test_ui.py").write_text(ui)
+    marks = [c.path for c in setup.propose(str(tmp_path)) if c.kind == "mark"]
+    assert marks == ["tests/test_ui.py"]

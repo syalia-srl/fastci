@@ -10,6 +10,7 @@ import difflib
 import os
 import re
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -132,9 +133,16 @@ def _marks(root: Path, from_map: str | None, slow_seconds: float) -> list[Change
                 path, name = t.split("::")[0], t.split("::")[-1].split("[")[0]
                 slow.setdefault(path, set()).add(name)
     out = []
-    for p in sorted(root.rglob("*.py")):
+    pp = root / "pyproject.toml"
+    ini = {}
+    if pp.exists():
+        ini = tomllib.loads(pp.read_text()).get("tool", {}).get("pytest", {})
+        ini = ini.get("ini_options", {})
+    tops = ini.get("testpaths") or ["."]
+    skip = {".venv", ".git", "node_modules", *ini.get("norecursedirs", [])}
+    for p in sorted(q for t in tops for q in (root / t).rglob("*.py")):
         rel = p.relative_to(root).as_posix()
-        if not is_test_file(rel) or rel.startswith((".venv/", ".git/")) or "/.venv/" in rel:
+        if not is_test_file(rel) or any(part in skip for part in Path(rel).parts[:-1]):
             continue
         src = p.read_text()
         after, why = src, []
