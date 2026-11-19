@@ -199,6 +199,11 @@ def covered(cmds: list[str], stages: list[str]) -> bool:
     return True
 
 
+def on_pull_requests(text: str) -> bool:
+    """A workflow that tests changes; release and deploy workflows are left alone."""
+    return bool(re.search(r"^\s*pull_request(_target)?\b", text, re.M))
+
+
 def _workflows(root: Path, stages: list[str]) -> list[Change]:
     out = []
     for wf in sorted((root / ".github" / "workflows").glob("*.y*ml")):
@@ -206,6 +211,8 @@ def _workflows(root: Path, stages: list[str]) -> list[Change]:
         if rel == WORKFLOW:
             continue
         text = wf.read_text()
+        if not on_pull_requests(text):
+            continue
         runs = [(a, b, run_lines(blk)) for a, b, blk in _steps(text) if run_lines(blk)]
         drop = [(a, b) for a, b, cmds in runs if covered(cmds, stages)]
         if not drop:
@@ -249,6 +256,8 @@ def check(root: str) -> list[Gap]:
         if rel == WORKFLOW:
             continue
         text = wf.read_text()
+        if not on_pull_requests(text):
+            continue
         lines = text.splitlines()
         for start, _, block in _steps(text):
             cmds = run_lines(block)

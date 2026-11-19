@@ -113,3 +113,9 @@ def test_guide_prints(capsys):
     assert cli.main(["guide"]) == 0
     out = capsys.readouterr().out
     assert "fastci setup --check" in out and "T3" in out
+
+
+def test_workflows_without_pull_request_are_left_alone(tmp_path):
+    root = str(copy(tmp_path, "setup-full"))
+    assert all(c.path != ".github/workflows/release.yml" for c in setup.propose(root))
+    assert all(g.workflow != ".github/workflows/release.yml" for g in setup.check(root))
