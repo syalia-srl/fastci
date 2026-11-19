@@ -1,20 +1,22 @@
-# testmap
+# fastci
+
+fastci was called testmap up to 0.1.0.
 
 Run in each pull request only the tests a change can break.
 
-testmap runs your pytest suite once, on main, and records two things for every
+fastci map runs your pytest suite once, on main, and records two things for every
 test: the lines of your code it runs (subprocesses it starts included) and the
 files of your repository it reads. That record is the map. In a pull request,
-testmap reads the diff, looks up which tests ran the changed lines or read the
+fastci reads the diff, looks up which tests ran the changed lines or read the
 changed files, and runs those.
 
 ```bash
 # on main, once per merge or once a night
-uv run --with testmap testmap record -- -n auto
+uv run --with fastci fastci map record -- -n auto
 
 # in a pull request, or before you push
-uv run --with testmap testmap pick --base origin/main --why
-uv run --with testmap testmap run --base origin/main -- -n auto
+uv run --with fastci fastci map pick --base origin/main --why
+uv run --with fastci fastci map run --base origin/main -- -n auto
 ```
 
 Main keeps running the whole suite: what a pull request misses shows up on the
@@ -24,7 +26,7 @@ next merge.
 
 For every path the diff touches:
 
-| The diff changes… | testmap runs… |
+| The diff changes… | fastci map runs… |
 |---|---|
 | the lockfile, `pyproject.toml`, a root `conftest.py`, a workflow | every test |
 | a test file | that file |
@@ -41,7 +43,7 @@ that compare a generated file with its source.
 In `pyproject.toml`:
 
 ```toml
-[tool.testmap]
+[tool.fastci]
 full = ["data/schema.sql"]        # more paths that mean "run everything"
 always = ["tests/test_docs.py"]   # files that always run
 global_share = 0.1                # optional: see DESIGN.md
@@ -51,16 +53,16 @@ global_share = 0.1                # optional: see DESIGN.md
 
 ```yaml
 # on push to main: record and upload
-- run: uv run --with "testmap @ git+https://github.com/syalia-srl/testmap@v0.1.0" testmap record --out map/map.json.gz -- -n auto
+- run: uv run --with "fastci @ git+https://github.com/syalia-srl/fastci@v0.1.0" fastci map record --out map/map.json.gz -- -n auto
 - uses: actions/upload-artifact@v4
-  with: { name: testmap, path: map/map.json.gz }
+  with: { name: fastci, path: map/map.json.gz }
 
 # on pull_request: fetch the newest map from main and run what it picks
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
 - run: |
-    uv run --with "$TESTMAP" testmap fetch
-    uv run --with "$TESTMAP" testmap run --base origin/${{ github.base_ref }} -- -n auto
+    uv run --with "$TESTMAP" fastci map fetch
+    uv run --with "$TESTMAP" fastci map run --base origin/${{ github.base_ref }} -- -n auto
   env:
     GH_TOKEN: ${{ github.token }}
 ```

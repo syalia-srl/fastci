@@ -1,6 +1,6 @@
-# testmap
+# fastci
 
-testmap chooses which pytest tests a pull request runs. It records, on main,
+fastci chooses which pytest tests a pull request runs. It records, on main,
 what every test executes and reads, and in a pull request it picks the tests
 that executed the changed lines or read the changed files. It exists so that a
 pull request is green in minutes and the full suite runs once, on main. It is a

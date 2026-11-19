@@ -4,7 +4,7 @@ This file changes only when the architecture changes.
 
 ## Components
 
-- **The plugin** (`testmap.plugin`) runs inside pytest. When recording, it puts
+- **The plugin** (`fastci.python.plugin`) runs inside pytest. When recording, it puts
   each test's id where a child process can read it and notes every repository
   file a test opens, through Python's audit hook on `open`. When running, it
   deselects the tests that were not picked.
@@ -39,7 +39,7 @@ This file changes only when the architecture changes.
 ## What a machine checks and what a reader judges
 
 The tests check each rule on a fixture project, including a mutation check for
-the subprocess hook. Whether a repository's history is safe under testmap is
+the subprocess hook. Whether a repository's history is safe under fastci is
 measured by replaying its past pull requests; that replay is not part of this
 package yet.
 

@@ -1,4 +1,4 @@
-"""``testmap record``: run the suite once, recording what every test runs and reads."""
+"""``fastci map record``: run the suite once, recording what every test runs and reads."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ parallel = true
 core = ctrace
 data_file = {data}
 patch = subprocess
-context = ${{TESTMAP_CTX}}
+context = ${{FASTCI_CTX}}
 """
 
 
@@ -34,21 +34,21 @@ def git(root: str, *args: str) -> str:
 def record(pytest_args: list[str], out: str, sources: list[str], root: str) -> int:
     """Run pytest with recording on, write the map to ``out``, return pytest's exit code."""
     root = os.path.realpath(root)
-    work = tempfile.mkdtemp(prefix="testmap-")
+    work = tempfile.mkdtemp(prefix="fastci-")
     data = os.path.join(work, "cov", ".coverage")
     os.makedirs(os.path.dirname(data))
     rc = os.path.join(work, "coveragerc")
     source = ",".join(os.path.join(root, s) for s in sources)
     Path(rc).write_text(COVERAGERC.format(source=source, data=data))
     env = dict(os.environ)
-    env.update(TESTMAP_RECORD=work, TESTMAP_ROOT=root, TESTMAP_CTX="")
+    env.update(FASTCI_RECORD=work, FASTCI_ROOT=root, FASTCI_CTX="")
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [SUBPROCESS_DIR, env.get("PYTHONPATH")]))
     cmd = [
         sys.executable,
         "-m",
         "pytest",
         "-p",
-        "testmap.plugin",
+        "fastci.python.plugin",
         *[f"--cov={os.path.join(root, s)}" for s in sources],
         "--cov-context=test",
         f"--cov-config={rc}",
@@ -60,7 +60,7 @@ def record(pytest_args: list[str], out: str, sources: list[str], root: str) -> i
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tm.save(out)
     print(
-        f"testmap: {len(tm.tests)} tests, {len(tm.files)} source files, "
+        f"fastci: {len(tm.tests)} tests, {len(tm.files)} source files, "
         f"{len(tm.reads)} files read, written to {out}",
         file=sys.stderr,
     )

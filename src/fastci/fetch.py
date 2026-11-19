@@ -1,4 +1,4 @@
-"""``testmap fetch``: download the newest map that a branch's CI uploaded.
+"""``fastci map fetch``: download the newest map that a branch's CI uploaded.
 
 It reads the GitHub REST API with the token in ``GH_TOKEN`` or
 ``GITHUB_TOKEN``, which needs ``actions: read``. Standard library only, so it
@@ -52,15 +52,8 @@ def newest_artifact(repo: str, name: str, branch: str, token: str) -> dict | Non
     return max(arts, key=lambda a: a["created_at"]) if arts else None
 
 
-def fetch(repo: str, out: str, branch: str = "main", name: str = "testmap") -> str | None:
-    """Write the newest map to ``out``; return the commit it was recorded at, or None."""
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise SystemExit("testmap fetch: set GH_TOKEN or GITHUB_TOKEN")
-    art = newest_artifact(repo, name, branch, token)
-    if art is None:
-        return None
-    first = _get(art["archive_download_url"], token, follow=False)
+def _download(url: str, token: str, out: str) -> None:
+    first = _get(url, token, follow=False)
     location = first.headers.get("Location")
     data = urllib.request.urlopen(location, timeout=120).read() if location else first.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -68,4 +61,21 @@ def fetch(repo: str, out: str, branch: str = "main", name: str = "testmap") -> s
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         with open(out, "wb") as f:
             f.write(z.read(member))
+
+
+def fetch(repo: str, out: str, branch: str = "main", name: str = "fastci") -> str | None:
+    """Write the newest map to ``out``; return the commit it was recorded at, or None.
+
+    Maps uploaded before the rename are named ``testmap``; they are used when no
+    ``fastci`` artifact exists.
+    """
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit("fastci: map fetch needs GH_TOKEN or GITHUB_TOKEN")
+    art = newest_artifact(repo, name, branch, token)
+    if art is None and name == "fastci":
+        art = newest_artifact(repo, "testmap", branch, token)
+    if art is None:
+        return None
+    _download(art["archive_download_url"], token, out)
     return art["workflow_run"].get("head_sha")

@@ -1,4 +1,4 @@
-"""``testmap pick``: the tests a diff can break, according to a map.
+"""``fastci map pick``: the tests a diff can break, according to a map.
 
 The rules, in order, for every path the diff touches:
 

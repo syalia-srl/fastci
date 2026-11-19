@@ -1,7 +1,7 @@
 [project]
-name = "testmap"
-version = "0.1.0"
-description = "Run in each pull request only the tests a change can break, from a map of what every test runs and reads."
+name = "fastci"
+version = "0.2.0.dev0"
+description = "Run in each case only the tests and checks a change can break, cheapest first."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -11,7 +11,10 @@ dependencies = [
 ]
 
 [project.scripts]
-testmap = "testmap.cli:main"
+fastci = "fastci.cli:main"
+
+[project.entry-points.pytest11]
+"fastci.python.plugin" = "fastci.python.plugin"
 
 [dependency-groups]
 dev = [

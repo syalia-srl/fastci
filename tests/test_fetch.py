@@ -3,7 +3,7 @@
 import io
 import json
 
-from testmap import fetch
+from fastci import fetch
 
 
 def test_newest_artifact_from_the_branch(monkeypatch):
@@ -45,3 +45,19 @@ def test_newest_artifact_from_the_branch(monkeypatch):
 
     monkeypatch.setattr(fetch, "_get", lambda url, token, follow=True: R(json.dumps(arts).encode()))
     assert fetch.newest_artifact("o/r", "testmap", "main", "t")["id"] == 2
+
+
+def test_fetch_falls_back_to_testmap_artifact(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_newest(repo, name, branch, token):
+        calls.append(name)
+        if name == "fastci":
+            return None
+        return {"id": 1, "workflow_run": {"head_sha": "abc"}, "archive_download_url": "u"}
+
+    monkeypatch.setattr(fetch, "newest_artifact", fake_newest)
+    monkeypatch.setattr(fetch, "_download", lambda url, token, out: None)
+    monkeypatch.setenv("GH_TOKEN", "t")
+    assert fetch.fetch("o/r", str(tmp_path / "m.gz")) == "abc"
+    assert calls == ["fastci", "testmap"]

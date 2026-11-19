@@ -25,12 +25,13 @@ def sample(tmp_path):
 
 
 def run_testmap(repo, *args):
-    """Run the testmap CLI inside the repo; return (exit code, stdout, stderr)."""
+    """Run the fastci map CLI inside the repo; return (exit code, stdout, stderr)."""
+    args = ("map", *args)
     env = dict(os.environ)
-    env.pop("TESTMAP_SELECT", None)
-    env.pop("TESTMAP_RECORD", None)
+    env.pop("FASTCI_SELECT", None)
+    env.pop("FASTCI_RECORD", None)
     p = subprocess.run(
-        [sys.executable, "-m", "testmap.cli", *args],
+        [sys.executable, "-m", "fastci.cli", *args],
         cwd=repo,
         capture_output=True,
         text=True,

@@ -1,4 +1,4 @@
-"""The ``testmap`` command."""
+"""The ``fastci`` command."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 
-DEFAULT_MAP = ".testmap/map.json.gz"
+DEFAULT_MAP = ".fastci/map.json.gz"
 
 
 def _root() -> str:
@@ -24,23 +24,23 @@ def _split(argv: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _pick(args):
-    from .mapfile import TestMap
-    from .pick import Config, Picker, git
+    from .python.mapfile import TestMap
+    from .python.pick import Config, Picker, git
 
     root = _root()
     if not os.path.exists(args.map):
-        print(f"testmap: no map at {args.map}; every test runs", file=sys.stderr)
+        print(f"fastci: no map at {args.map}; every test runs", file=sys.stderr)
         return None, None
     tm = TestMap.load(args.map)
     base = git(root, "merge-base", args.base, args.head or "HEAD").strip() or args.base
     p = Picker(tm, root, Config.load(root)).pick(base, args.head)
     if p.full:
-        print(f"testmap: {p.why['*']}; every test runs", file=sys.stderr)
+        print(f"fastci: {p.why['*']}; every test runs", file=sys.stderr)
         return tm, p
     share = sum(tm.durations[i] for i, t in enumerate(tm.tests) if t in p.tests)
     total = sum(tm.durations) or 1
     print(
-        f"testmap: {len(p.tests)} of {len(tm.tests)} tests from the map"
+        f"fastci: {len(p.tests)} of {len(tm.tests)} tests from the map"
         f" ({share / total:.0%} of the suite's time) and {len(p.files)} changed test files",
         file=sys.stderr,
     )
@@ -50,8 +50,10 @@ def _pick(args):
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
-    parser = argparse.ArgumentParser(prog="testmap", description=__doc__)
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser = argparse.ArgumentParser(prog="fastci", description=__doc__)
+    top = parser.add_subparsers(dest="top", required=True)
+    mp = top.add_parser("map", help="record, read and fetch the map of what each test runs")
+    sub = mp.add_subparsers(dest="cmd", required=True)
 
     rec = sub.add_parser("record", help="run pytest once and write the map")
     rec.add_argument("--out", default=DEFAULT_MAP)
@@ -71,13 +73,13 @@ def main(argv: list[str] | None = None) -> int:
     fe = sub.add_parser("fetch", help="download the newest map a branch's CI uploaded")
     fe.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"), required=False)
     fe.add_argument("--branch", default="main")
-    fe.add_argument("--name", default="testmap", help="the artifact's name")
+    fe.add_argument("--name", default="fastci", help="the artifact's name")
     fe.add_argument("--out", default=DEFAULT_MAP)
 
     args = parser.parse_args(own)
 
     if args.cmd == "record":
-        from .record import default_sources, record
+        from .python.record import default_sources, record
 
         root = _root()
         return record(rest, args.out, args.source or default_sources(root), root)
@@ -90,11 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         sha = fetch(args.repo, args.out, args.branch, args.name)
         if sha is None:
             print(
-                f"testmap: no '{args.name}' artifact from {args.branch} in {args.repo}",
+                f"fastci: no '{args.name}' artifact from {args.branch} in {args.repo}",
                 file=sys.stderr,
             )
             return 0
-        print(f"testmap: map of {args.branch} at {sha[:10]} written to {args.out}", file=sys.stderr)
+        print(f"fastci: map of {args.branch} at {sha[:10]} written to {args.out}", file=sys.stderr)
         return 0
 
     _, p = _pick(args)
@@ -110,15 +112,13 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     if p is not None and not p.full:
         if not p.lines():
-            print(
-                "testmap: no test can be affected by this change; nothing to run", file=sys.stderr
-            )
+            print("fastci: no test can be affected by this change; nothing to run", file=sys.stderr)
             return 0
-        fd, sel = tempfile.mkstemp(prefix="testmap-select-", suffix=".txt")
+        fd, sel = tempfile.mkstemp(prefix="fastci-select-", suffix=".txt")
         with os.fdopen(fd, "w") as f:
             f.write("\n".join(p.lines()) + "\n")
-        env["TESTMAP_SELECT"] = sel
-        cmd[3:3] = ["-p", "testmap.plugin"]
+        env["FASTCI_SELECT"] = sel
+        cmd[3:3] = ["-p", "fastci.python.plugin"]
     code = subprocess.run(cmd, env=env).returncode
     return 0 if code == 5 else code
 
