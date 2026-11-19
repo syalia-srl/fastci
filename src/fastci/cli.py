@@ -24,8 +24,9 @@ def _split(argv: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _pick(args):
+    from .config import load
     from .python.mapfile import TestMap
-    from .python.pick import Config, Picker, git
+    from .python.pick import Picker, git
 
     root = _root()
     if not os.path.exists(args.map):
@@ -33,7 +34,7 @@ def _pick(args):
         return None, None
     tm = TestMap.load(args.map)
     base = git(root, "merge-base", args.base, args.head or "HEAD").strip() or args.base
-    p = Picker(tm, root, Config.load(root)).pick(base, args.head)
+    p = Picker(tm, root, load(root).tests).pick(base, args.head)
     if p.full:
         print(f"fastci: {p.why['*']}; every test runs", file=sys.stderr)
         return tm, p
