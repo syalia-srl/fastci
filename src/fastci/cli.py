@@ -203,7 +203,7 @@ def _caps(cfg, ctx, projects, maps) -> dict:
 
 def _run(args) -> int:
     from .adapter import adapters
-    from .execute import execute, say
+    from .execute import Flagger, _token, execute, repo_of, say
     from .flaky import FlakyRun
 
     root, cfg, ctx, projects, steps, caps, reach = _prepare(args)
@@ -221,7 +221,12 @@ def _run(args) -> int:
         fail_fast_tests=ctx.spec.fail_fast,
         wrap=caps["wrap"],
         cap_note=caps["note"],
-        flaky=FlakyRun(cfg.flaky, cfg.retries_for(ctx.tier), reach),
+        flaky=FlakyRun(
+            cfg.flaky,
+            cfg.retries_for(ctx.tier),
+            reach,
+            Flagger(cfg.flaky, ctx, root, repo_of(root), _token(ctx)),
+        ),
     )
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import itertools
+import json
 import os
 import re
 import signal
@@ -12,13 +14,18 @@ import sys
 import tempfile
 from collections.abc import Callable
 
-from . import fetch, results
+from . import fetch, issues, results
 from .adapter import Adapter, Project
+from .config import FlakyConfig
 from .flaky import (
+    HISTORY,
     UNJUDGEABLE,
     UNJUDGEABLE_SINCE,
     UNMAPPED,
+    Entry,
     FlakyRun,
+    History,
+    Reach,
     Verdict,
     judge,
     strip_xdist,
@@ -29,6 +36,7 @@ from .tier import Context
 
 TEST_STAGES = ("always", "tests", "marked")
 MAP = os.path.join(".fastci", "map.json.gz")
+FLAGGED = os.path.join(".fastci", "flagged.json")
 
 
 def say(msg: str) -> None:
@@ -46,6 +54,7 @@ def execute(
     flaky: FlakyRun | None = None,
 ) -> int:
     ran = skipped = 0
+    env: dict[str, str] | None = None  # the flags, read before the first test stage
     for i, s in enumerate(steps):
         if s.action == "skip":
             say(f"{s.stage} skipped: {s.reason}")
@@ -56,10 +65,14 @@ def execute(
         if s.stage in TEST_STAGES:
             args = [*s.command, *(["--maxfail=1"] if fail_fast_tests else [])]
             adapter = adapters[project.adapter]
+            if env is None:
+                env = {}
+                if flaky is not None and flaky.flagger is not None:
+                    flaky.flagger.prepare(env)
             if flaky is None or flaky.retries == 0:
-                code = adapter.run_tests(project, root, s.select, args, {}, wrap)
+                code = adapter.run_tests(project, root, s.select, args, env, wrap)
             else:
-                code = _judged(adapter, project, root, s.select, args, wrap, flaky, cap_note)
+                code = _judged(adapter, project, root, s.select, args, wrap, flaky, cap_note, env)
             code = 0 if code == 5 else code
         else:
             cwd = os.path.join(root, project.root)
@@ -136,12 +149,12 @@ def strip_stop_early(args: list[str]) -> list[str]:
     return out
 
 
-def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_note) -> int:
+def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_note, base) -> int:
     """Run a test stage, retry what failed and judge it: the stage's exit code.
 
     When pytest says it stopped early (-x or --maxfail, wherever they were set), a
     forgiven failure must not end the stage, so it runs again without the tests
-    already passed or judged."""
+    already passed or judged. ``base`` is the environment of every pytest run."""
     rescued: set[str] = set()  # passed on retry, in any run of the stage
     done: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="fastci-") as tmp:
@@ -152,14 +165,22 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
             code = adapter.run_tests(project, root, sel, a, {**env, "FASTCI_RESULTS": path}, wrap)
             return code, path
 
+        def flag(verdicts, res):
+            if flaky.flagger is not None and res is not None:
+                flaky.flagger.after(verdicts, res, flaky.reach)
+
         while True:
-            env = {}
+            env = dict(base)
             if done:
                 env["FASTCI_DONE"] = os.path.join(tmp, f"done-{next(n)}.txt")
                 with open(env["FASTCI_DONE"], "w", encoding="utf-8") as f:
                     f.write("".join(f"{t}\n" for t in sorted(done)))
             code, path = run(select, args, env)
-            if code in (0, 5) or (cap_note and killed_by_cap(code)):
+            if code in (0, 5):
+                if flaky.flagger is not None:  # main counts the flagged tests that passed
+                    flag([], results.read(path, False))
+                return code
+            if cap_note and killed_by_cap(code):
                 return code
             if code != 1 and not results.signalled(code):
                 return code  # interrupted, an internal or a usage error: no test to blame
@@ -168,6 +189,7 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                 return code
             failed = [*res.failed, *sorted(res.crashed - set(res.failed))]
             if not failed:
+                flag([], res)
                 return code
             retry = [t for t in failed if t not in res.crashed]
             if retry:
@@ -179,7 +201,7 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                 if not retry:
                     break
                 # --maxfail=0 last: -x in addopts or PYTEST_ADDOPTS comes before it.
-                c, p = run(retry, [*strip_stop_early(strip_xdist(args)), "--maxfail=0"], {})
+                c, p = run(retry, [*strip_stop_early(strip_xdist(args)), "--maxfail=0"], base)
                 again = results.read(p, results.signalled(c))
                 if again:
                     rescued |= again.passed & set(retry)
@@ -197,6 +219,7 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                     flaky.cfg.store,
                     flaky.reach.since,
                 )
+            flag(verdicts, res)
             if any(v.blocks for v in verdicts):
                 return code
             if not res.explained:
@@ -207,7 +230,163 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                 return code
             if not res.stopped:
                 return 0
-            done |= res.passed | set(failed)
+            # A flagged test that ran is done too, whatever its outcome.
+            done |= res.passed | set(failed) | res.flagged.keys()
+
+
+class Flagger:
+    """Reads the flagged tests before the test stages and writes the flags after a
+    verdict: issues or mark lines, and on main the history. Nothing GitHub answers
+    changes a verdict: a failure costs one line here and one in ``lines``."""
+
+    def __init__(
+        self, cfg: FlakyConfig, ctx: Context, root: str, repo: str | None, token: str | None
+    ):
+        self.cfg, self.ctx, self.root, self.repo, self.token = cfg, ctx, root, repo, token
+        self.lines: list[str] = []  # what goes to the job summary
+        self.issues: dict[str, issues.Issue] | None = None  # None: not read
+        self.history: History | None = None  # on main only
+        self.laptop = ctx.spec.capped
+        self.main = ctx.tier == "main" and not self.laptop
+        m = re.fullmatch(r"refs/pull/(\d+)/merge", os.environ.get("GITHUB_REF", ""))
+        self.pr = m.group(1) if m and not self.laptop else None
+        self.sha = os.environ.get("GITHUB_SHA", "")
+        self.run = os.environ.get("GITHUB_RUN_ID", "")
+
+    def _say(self, line: str) -> None:
+        say(line)
+        self.lines.append(line)
+
+    def prepare(self, env: dict[str, str]) -> None:
+        """Write the flagged file and set the plugin's variables in ``env``."""
+        env["FASTCI_FLAKY_MARK"] = self.cfg.mark
+        if self.cfg.flagged == "skip" and self.ctx.spec.tests == "picked":
+            env["FASTCI_SKIP_FLAGGED"] = "1"
+        if self.cfg.store in ("issues", "both"):
+            flagged = self._flagged()
+            if flagged is not None:
+                path = os.path.join(self.root, FLAGGED)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(flagged, f, ensure_ascii=False)
+                env["FASTCI_FLAGGED"] = path
+        if self.main:
+            self.history = self._fetch_history()
+
+    def _flagged(self) -> dict[str, int] | None:
+        """The open flaky issues, by node id; on a laptop offline, its last copy."""
+        if self.repo and self.token:
+            try:
+                # On a laptop a dead network must not hold up the tests.
+                timeout = 5 if self.laptop else 60
+                self.issues = issues.listed(self.repo, self.token, self.cfg.label, timeout)
+            except Exception as e:
+                self._say(f"could not read the flaky issues: {e}")
+        elif not self.laptop:
+            self._say("could not read the flaky issues: no GitHub repository or token")
+        if self.issues is not None:
+            return {id: i.number for id, i in self.issues.items() if i.open}
+        if not self.laptop:
+            return None
+        try:
+            with open(os.path.join(self.root, FLAGGED), encoding="utf-8") as f:
+                copy = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return copy if isinstance(copy, dict) else None
+
+    def _fetch_history(self) -> History:
+        """The newest history main uploaded; empty when there is none."""
+        path = os.path.join(self.root, HISTORY)
+        if not (self.repo and self.token):
+            self._say("could not fetch the flaky history: no GitHub repository or token")
+            return History()
+        branch = os.environ.get("GITHUB_REF_NAME", "main")
+        try:
+            art = fetch.newest_artifact(self.repo, "fastci-flaky", branch, self.token)
+            if art is not None:
+                fetch._download(art["archive_download_url"], self.token, path, "flaky.json")
+        except Exception as e:
+            why = str(e) or type(e).__name__  # StopIteration: no flaky.json in the artifact
+            self._say(f"could not fetch the flaky history ({why}); it starts empty")
+            return History()
+        return History.load(path)
+
+    def after(self, verdicts: list[Verdict], res: results.Results, reach: Reach) -> None:
+        """Flag each test the verdicts forgave; on main, add this run to the history."""
+        flaky = [v.id for v in verdicts if v.kind == "flaky"]
+        changed = self._record(flaky, res) if self.history is not None else set()
+        for id in flaky:
+            if self.laptop:
+                later = "failed and then passed; CI will flag it if it does the same there"
+                say(f"{id}{INDENT}{later}")
+                continue
+            number = self._write(id) if self.cfg.store in ("issues", "both") else None
+            if self.cfg.store in ("marks", "both"):
+                n = f"#{number}" if number else "#?"
+                self._say(f'add @pytest.mark.{self.cfg.mark}("{n}") to {id}')
+        for id in sorted(changed):
+            issue = (self.issues or {}).get(id)
+            if issue is not None and issue.open and self.history is not None:
+                try:
+                    text = issues.body(id, self.history.tests[id], self.cfg.unflag_after)
+                    issues.edit(self.repo, self.token, issue.number, text)
+                except Exception as e:
+                    self._say(f"could not write the flag for {id}: {e}")
+        if self.history is not None:
+            self.history.save(os.path.join(self.root, HISTORY))
+
+    def _record(self, flaky: list[str], res: results.Results) -> set[str]:
+        """Add the flagged tests' outcomes and the flakes to the history: the
+        flagged tests whose rate changed."""
+        assert self.history is not None
+        date = datetime.datetime.now(datetime.UTC).date().isoformat()
+        changed = set()
+        for id in res.flagged:
+            if id in res.outcomes:
+                before = self.history.rate(id)
+                failed = res.outcomes[id] == "failed"
+                self.history.record(id, failed, self._where(id, res, date))
+                if self.history.rate(id) != before:
+                    changed.add(id)
+        for id in flaky:
+            self.history.record(id, True, self._where(id, res, date))
+        return changed
+
+    def _where(self, id: str, res: results.Results, date: str) -> dict:
+        return {"sha": self.sha, "run": self.run, "date": date, "error": res.errors.get(id, "")}
+
+    def _write(self, id: str) -> int | None:
+        """Open, reopen, rewrite or comment on the test's issue: its number, or None."""
+        if self.issues is None:
+            self._say(f"could not write the flag for {id}: the flaky issues could not be read")
+            return None
+        issue = self.issues.get(id)
+        if not (self.main or self.pr):
+            return issue.number if issue else None
+        repo, token = self.repo, self.token
+        try:
+            entry = self.history.tests[id] if self.history is not None else Entry()
+            text = issues.body(id, entry, self.cfg.unflag_after)
+            if issue is None:
+                number, how = issues.open_issue(repo, token, self.cfg.label, id, text), " (new)"
+            else:
+                number, how = issue.number, "" if issue.open else " (reopened)"
+                if not issue.open:
+                    issues.set_open(repo, token, number, True)
+                if self.main:
+                    issues.edit(repo, token, number, text)
+            self.issues[id] = issues.Issue(number, True)
+            if self.history is not None:
+                entry.issue = number
+            if self.pr:
+                when = f"Failed and then passed on #{self.pr} at {self.sha[:7]} (run {self.run})."
+                issues.comment(repo, token, number, when)
+        except Exception as e:
+            self._say(f"could not write the flag for {id}: {e}")
+            return issue.number if issue else None
+        self._say(f"{id}{INDENT}flagged as flaky: #{number}{how}")
+        return number
 
 
 def repo_from_url(url: str) -> str | None:
