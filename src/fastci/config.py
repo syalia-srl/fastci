@@ -229,6 +229,8 @@ def _flaky(table: dict, where: str) -> FlakyConfig:
         raise ConfigError(f'{w} store must be "issues", "marks" or "both"')
     if flaky.flagged not in ("run", "skip"):
         raise ConfigError(f'{w} flagged must be "run" or "skip"')
+    if flaky.mark in ("always", *RELEASE_ONLY):
+        raise ConfigError(f"{w} mark must not be one of fastci's own marks ({flaky.mark!r})")
     return flaky
 
 
