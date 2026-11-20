@@ -199,7 +199,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <thead><tr><th>Case</th><th>Verdict</th><th>What fastci writes</th></tr></thead>
 <tbody>
 <tr><td>Flagged already</td><td><span class="green">never blocks</span>, not retried</td><td class="why">Its pass or failure into the history; nothing new on the issue unless its rate changed.</td></tr>
-<tr><td>Crashed by a signal</td><td><span class="red">red</span>, not retried</td><td class="why">"Test X killed its process with SIGBUS: a fault in the code or the machine, not a flake."</td></tr>
+<tr><td>Crashed by a signal</td><td><span class="red">red</span>, not retried, even when the test is flagged: a crash stops the stage before the rest of it runs</td><td class="why">"Test X killed its process with SIGBUS: a fault in the code or the machine, not a flake."</td></tr>
 <tr><td>Failed again on retry</td><td><span class="red">red</span></td><td class="why">The normal failure.</td></tr>
 <tr><td>Passed on retry, and at least <code>machine-threshold</code> tests did so in this run</td><td><span class="red">red</span></td><td class="why">"N tests failed and then passed: this looks like the machine, not the code." Lists them. Flags none.</td></tr>
 <tr><td>Passed on retry, and the change reaches the test</td><td><span class="red">red</span></td><td class="why">"Test X failed and then passed, and this change reaches it through <em>reason</em>: check for a race in what the change touched." Flags nothing: the flake may be the change's.</td></tr>
@@ -263,7 +263,7 @@ has landed on main and main has run it 20 times in a row without a failure.</pre
 <p>Main runs the whole suite, and nothing in a diff can be blamed there, so main is where the rates are measured. The <code>check</code> job does it, not the map job:</p>
 <ol>
 <li>Before the tests, it fetches the newest <code>fastci-flaky</code> artifact from main. This is its own fetch: <code>ensure_map</code> fetches nothing when the tier runs every test, and the history is needed exactly then.</li>
-<li>After judging, it adds to <code>.fastci/flaky.json</code> every flagged test's outcome and every test that passed on retry: the last 50 outcomes on main per test, and the first and last failure with their commit and run.</li>
+<li>After judging, it adds to <code>.fastci/flaky.json</code> every flagged test's outcome and every test forgiven as flaky, once per run however many stages ran it: the last 50 outcomes on main per test, and the first and last failure with their commit and run.</li>
 <li>It uploads the file as <code>fastci-flaky</code> with 90 days of retention, even when the run is red.</li>
 </ol>
 <p>Two main runs that overlap can each extend the same older file, and the later upload wins; one run's outcomes are lost, which a 50-run window absorbs. When no history can be fetched (the first run, or every artifact expired), it starts empty: the flags themselves live in the issues or the marks, so nothing is unflagged by the loss, only the count toward <code>unflag-after</code> restarts.</p>
