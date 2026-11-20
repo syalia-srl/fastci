@@ -311,8 +311,7 @@ class Flagger:
         ref = env.get("GITHUB_REF", "")
         ci = self.ci = ctx.ci and not self.laptop
         # Main is the push to the default branch: it writes the history and the bodies.
-        push = env.get("GITHUB_EVENT_NAME") == "push"
-        self.main = ci and push and ref == f"refs/heads/{default_branch}"
+        self.main = on_main(ctx, default_branch)
         # Anywhere else in CI a flake adds an occurrence: "#7" on a pull request, else the ref.
         m = re.fullmatch(r"refs/pull/(\d+)/merge", ref)
         where = f"#{m.group(1)}" if m else env.get("GITHUB_REF_NAME") or ref
@@ -579,6 +578,24 @@ class Flagger:
         line = f"flagged as flaky: #{number}{how}"
         self.lines.append(f"{id}: {line}")
         return number, line
+
+
+def on_main(ctx: Context, default_branch: str) -> bool:
+    """Whether this is CI's push to the default branch, the run that writes the history."""
+    env = os.environ
+    push = env.get("GITHUB_EVENT_NAME") == "push"
+    ref = env.get("GITHUB_REF", "")
+    return ctx.ci and not ctx.spec.capped and push and ref == f"refs/heads/{default_branch}"
+
+
+def drop_stale_history(root: str, ctx: Context, default_branch: str) -> None:
+    """On main, remove the history an earlier run left in a kept workspace: the upload
+    must carry this run's or none, never an older copy."""
+    if on_main(ctx, default_branch):
+        try:
+            os.remove(os.path.join(root, HISTORY))
+        except FileNotFoundError:
+            pass
 
 
 def _head_sha() -> str | None:

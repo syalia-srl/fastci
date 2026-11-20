@@ -192,3 +192,24 @@ def test_unknown_tier_is_a_clear_error(tmp_git_repo, monkeypatch, capsys):
     monkeypatch.chdir(tmp_git_repo)
     assert cli.main(["plan", "--tier", "T1"]) == 2
     assert "no tier named 'T1'; the tiers are local, release, main, pr" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("ref,kept", [("refs/heads/main", False), ("refs/pull/7/merge", True)])
+def test_a_push_to_main_drops_a_flaky_history_a_kept_workspace_left(
+    tmp_git_repo, monkeypatch, ref, kept
+):
+    # A self-hosted runner keeps its workspace: an old copy must never be uploaded.
+    from fastci import cli
+
+    stale = tmp_git_repo / ".fastci" / "flaky.json"
+    stale.parent.mkdir()
+    stale.write_text('{"version": 1, "tests": {}}')
+    monkeypatch.chdir(tmp_git_repo)
+    for k in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_REPOSITORY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request" if "pull" in ref else "push")
+    monkeypatch.setenv("GITHUB_REF", ref)
+    assert cli.main([]) == 0
+    assert stale.exists() is kept

@@ -203,10 +203,11 @@ def _caps(cfg, ctx, projects, maps) -> dict:
 
 def _run(args) -> int:
     from .adapter import adapters
-    from .execute import Flagger, _token, execute, repo_of, say
+    from .execute import Flagger, _token, drop_stale_history, execute, repo_of, say
     from .flaky import FlakyRun
 
     root, cfg, ctx, projects, steps, caps, reach = _prepare(args)
+    drop_stale_history(root, ctx, cfg.default_branch)
     say(ctx.reason)
     if caps["line"]:
         say(caps["line"])
