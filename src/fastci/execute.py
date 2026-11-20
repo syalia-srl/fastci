@@ -74,6 +74,8 @@ def execute(
                 code = adapter.run_tests(project, root, s.select, args, env, wrap)
             else:
                 code = _judged(adapter, project, root, s.select, args, wrap, flaky, cap_note, env)
+                if flaky.flagger is not None:
+                    flaky.flagger.say_stage()
             code = 0 if code == 5 else code
         else:
             cwd = os.path.join(root, project.root)
@@ -296,6 +298,7 @@ class Flagger:
         self.ran: dict[str, bool] = {}  # the flagged tests that ran: failed in any stage
         self.numbers: dict[str, int] = {}  # the issue each flagged test's mark names
         self.marked: set[str] = set()  # the flagged tests that ran with the mark on them
+        self.stage: dict[str, tuple[bool, int | None]] = {}  # this stage's: failed, issue
         self.laptop = ctx.spec.capped
         env = os.environ
         ref = env.get("GITHUB_REF", "")
@@ -383,6 +386,7 @@ class Flagger:
         for id, number in res.flagged.items():
             if id in res.outcomes:
                 self.ran[id] = self.ran.get(id, False) or res.outcomes[id] == "failed"
+                self.stage[id] = (res.outcomes[id] == "failed", number)
                 if number:
                     self.numbers[id] = number
                 if id in res.marked:
@@ -417,6 +421,18 @@ class Flagger:
         if self.history is not None:
             self.history.save(os.path.join(self.root, HISTORY))
         return notes
+
+    def say_stage(self) -> None:
+        """Name the flagged tests the stage ran, with their outcomes."""
+        if not self.stage:
+            return
+        n = len(self.stage)
+        each = [
+            f"{id} {'failed' if failed else 'passed'}" + (f" (#{number})" if number else "")
+            for id, (failed, number) in sorted(self.stage.items())
+        ]
+        say(f"{n} flagged test{'s' if n > 1 else ''} ran: {', '.join(each)}")
+        self.stage = {}
 
     def finish(self, reach: Reach) -> None:
         """After the last stage: on main, unflag what left the list and save the

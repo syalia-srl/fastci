@@ -1024,3 +1024,24 @@ def test_on_main_a_closed_issue_drops_the_landing(monkeypatch, tmp_path):
     assert run([tests_step()], a, fail_fast_tests=False, flaky=FlakyRun(f.cfg, 1, NOTHING, f)) == 0
     e = History.load(tmp_path / HISTORY).tests["t::f"]
     assert (e.landed, e.clean, e.landed_sha) == (False, 0, None) and gh.writes() == []
+
+
+def test_each_test_stage_says_which_flagged_tests_ran(monkeypatch, tmp_path, capsys):
+    FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
+    in_ci(monkeypatch, "refs/pull/7/merge")
+    f = flagger(tmp_path)
+    always = Step("always", ".", "run", ["-m", "always"], None, "")
+    both = [*flagged_outcome("t::f", "passed", 5), *flagged_outcome("t::m", "failed", None)]
+    a = FakeAdapter(script=[(0, flagged_outcome("t::f", "failed", 5)), (0, both)])
+    fr = FlakyRun(f.cfg, 1, NOTHING, f)
+    assert run([always, tests_step()], a, fail_fast_tests=False, flaky=fr) == 0
+    err = capsys.readouterr().err
+    assert "fastci: 1 flagged test ran: t::f failed (#5)\n" in err
+    assert "fastci: 2 flagged tests ran: t::f passed (#5), t::m failed\n" in err
+
+
+def test_a_stage_without_flagged_tests_says_nothing_of_them(monkeypatch, tmp_path, capsys):
+    FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/pull/7/merge")
+    run_flagged(flagger(tmp_path), FakeAdapter(script=[(0, events(["b"]))]))
+    assert "flagged test" not in capsys.readouterr().err
