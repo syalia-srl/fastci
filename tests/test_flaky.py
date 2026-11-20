@@ -24,3 +24,9 @@ def test_full_pick_reaches_only_changed_test_files():
 
 def test_no_pick_reaches_everything():
     assert "anything::t" in reach_of(None, set(), 0.2)
+
+
+def test_files_listed_in_always_do_not_reach():
+    p = Pick(False, set(), {"tests/test_always.py"}, {"tests/test_always.py": "listed in always"})
+    assert "tests/test_always.py::t" not in reach_of(p, set(), 0.2)
+    assert "tests/test_always.py::t" in reach_of(p, {"tests/test_always.py"}, 0.2)

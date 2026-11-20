@@ -33,8 +33,9 @@ def reach_of(pick: Pick | None, changed_tests: set[str], share: float) -> Reach:
     if pick.full:
         return Reach(frozenset(), frozenset(changed_tests))
     tests = frozenset(t for t, s in pick.reach.items() if s <= share)
+    files = {f for f in pick.files if pick.why.get(f) != "listed in always"}
     return Reach(
         tests,
-        frozenset(pick.files | changed_tests),
+        frozenset(files | changed_tests),
         {t: pick.why[t] for t in tests if t in pick.why},
     )
