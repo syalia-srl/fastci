@@ -164,6 +164,8 @@ def gather(root: str, ctx: Context, cfg: Config, map_path: str):
     projects = [p for a in adapters() for p in a.detect(root)]
     changed = changed_files(root, ctx.base) if ctx.base else None
     tm = TestMap.load(map_path) if os.path.exists(map_path) else None
+    if tm is not None and not tm.tests:
+        tm = None  # an empty map, from a recording that collected nothing, picks nothing
     picks: dict[str, Pick | None] = {}
     maps: dict[str, TestMap | None] = {}
     for p in projects:

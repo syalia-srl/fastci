@@ -116,14 +116,15 @@ class PythonAdapter:
         code = subprocess.run(wrap(cmd), cwd=os.path.join(repo, project.root), env=self.env(extra))
         return code.returncode
 
-    def record(self, project, repo, out, args) -> int:
+    def record(self, project, repo, out, args, sources=None) -> int:
         from .record import default_sources, record
 
         root = os.path.join(repo, project.root)
         python = self.python(project)
         if python[:2] == ["uv", "run"]:
             python = ["uv", "run", "--with", "pytest-cov", *python[2:]]
-        return record(args, out, default_sources(root), root, python=python, env=self.env())
+        sources = sources or default_sources(root)
+        return record(args, out, sources, root, python=python, env=self.env())
 
     def tests(self, project, repo) -> list[tuple[str, frozenset[str]]]:
         fd, path = tempfile.mkstemp(prefix="fastci-collect-", suffix=".jsonl")

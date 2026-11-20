@@ -1,11 +1,13 @@
 # Quick Start
 
-fastci runs with `uvx`, so there is nothing to install into your project. It is not on PyPI yet, so `uvx` takes it from its git tag:
+fastci is a tool of its own, so nothing goes into your project. It is not on PyPI yet, so install it from its git tag:
 
 ```bash
-alias fastci='uvx --from git+https://github.com/syalia-srl/fastci@v0.2.0 fastci'
-fastci --help
+uv tool install git+https://github.com/syalia-srl/fastci@v0.2.1
+fastci --version
 ```
+
+In CI the generated workflow runs it with `uvx --from git+…` instead. On a laptop, install it: `uvx` resolves the git tag again on every call, about seven seconds each time, while the installed command plans in a fraction of a second.
 
 This chapter uses a small project, a shop with a cart. It has two functions and one test for each, and `total` reads its prices from a JSON file:
 
