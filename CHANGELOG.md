@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- A failed test is retried once, serially, in a fresh pytest process on the same
+  machine. If it passes, the verdict depends on what the change reaches: a test
+  the change does not reach goes green; one it reaches stays red, as do a crash,
+  a second failure, and three or more tests passing on the retry (the machine).
+- Main and release branches judge against the commits since the last green run
+  of the same workflow on the same branch. Without a map, a token, a green run
+  or that run's commit, every test counts as reached and the run says why.
+- `[tool.fastci.flaky]`: `retries`, `machine-threshold`, `reach-share`,
+  `forgive-reached`; a tier table takes `retries`.
+- The book: a chapter on flaky tests.
+
 ## 0.2.1
 
 - `fastci map record --source` ran pytest with fastci's own interpreter, not
