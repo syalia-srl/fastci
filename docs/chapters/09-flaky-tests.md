@@ -22,7 +22,7 @@ Each test that failed gets one verdict. The first row that matches decides:
 | it passed on the retry, and the change reaches it | red: check for a race in what the change touched |
 | it passed on the retry, and the change does not reach it | green |
 
-A change reaches a test when the map says the test ran a line the change touched, or read a file it changed, or when the change edits the test's own file. Code that runs under nearly every test, such as an application's startup, does not count: a test is reached through a line only if at most `reach-share` of the suite ran that line (a fifth by default). Files that run only because they are listed in `always` are not reached either.
+A change reaches a test when the map says the test ran a line the change touched, or read a file it changed, or when the change edits the test's own file. Code that runs under nearly every test, such as an application's startup, does not count: a test is reached through a line only if at most `reach-share` of the suite ran that line (a fifth by default). Files that run only because they are listed in `always` are not reached either. A change to a path that makes fastci run every test, such as a lockfile, `pyproject.toml`, a `conftest.py` or a CI workflow, reaches every test through that path.
 
 When fastci cannot tell what a change reaches, for example without a map, every test counts as reached and fails the run. fastci says so.
 
@@ -69,11 +69,22 @@ marker.unlink()
 demo.sh("fastci", env={"CI": "true"})
 ```
 
-On a pull request, most failing tests were picked because the change reaches them, so a pass on the retry still leaves the run red. Pull requests forgive mainly tests marked `always` and tests run because a file such as `pyproject.toml` changed.
+On a pull request, most failing tests were picked because the change reaches them, so a pass on the retry still leaves the run red. Pull requests forgive mainly tests marked `always`.
 
 ## On main and on a release branch
 
 The default branch and a release branch run every test, so their diff is a different one: the commits since the last green run of the same workflow on the same branch. A race that a pull request brought in and that did not show in its own run must not be forgiven when it shows right after the merge.
+
+The verdicts name that diff instead of a change:
+
+```text
+fastci: tests/test_links.py::test_reads_across_a_link
+          failed, then passed; no commit since the last green run reaches it
+          passed in a fresh process: it may depend on test order
+fastci: tests/test_api.py::test_upload_resumes
+          failed, then passed; the commits since 9f8e7d6 reach it through src/api/upload.py:resume
+          red: check for a race in what those commits touched
+```
 
 To find that run, fastci asks the GitHub API for the newest successful push run of the workflow on the branch. It needs the map from the default branch, the variables GitHub Actions sets (`GITHUB_REPOSITORY`, `GITHUB_WORKFLOW_REF`, `GITHUB_RUN_ID`) and a token with `actions: read`. It also needs that run's commit in the clone, so check out with `fetch-depth: 0`. When something is missing (no map, no token, no green run yet, or a commit a shallow clone does not have), every test counts as reached, and the run says why in one line:
 
