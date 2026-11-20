@@ -67,7 +67,8 @@ def execute(
             adapter = adapters[project.adapter]
             if env is None:
                 env = {}
-                if flaky is not None and flaky.flagger is not None:
+                # retries = 0 turns the feature off: no flag applies, nothing is read.
+                if flaky is not None and flaky.retries > 0 and flaky.flagger is not None:
                     flaky.flagger.prepare(env)
             if flaky is None or flaky.retries == 0:
                 code = adapter.run_tests(project, root, s.select, args, env, wrap)

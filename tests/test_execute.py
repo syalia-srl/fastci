@@ -657,6 +657,20 @@ def test_a_history_entry_with_a_new_key_is_kept(monkeypatch, tmp_path):
     assert History.load(tmp_path / HISTORY).tests["t::a"].main == [0, 0, 1]
 
 
+@pytest.mark.parametrize("ref,tier", [("refs/heads/main", "main"), ("refs/pull/7/merge", "pr")])
+def test_retries_zero_turns_flags_off(monkeypatch, tmp_path, ref, tier):
+    # A flagged test then blocks like any test: nothing is read, set or written.
+    gh = FakeIssues(monkeypatch, {"t::a": issues.Issue(18, True)})
+    in_ci(monkeypatch, ref)
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: pytest.fail("fetched"))
+    f = flagger(tmp_path, tier=tier, flagged="skip")
+    a = FakeAdapter(script=[(1, events([], ["t::a"]))])
+    fr = FlakyRun(f.cfg, 0, NOTHING, f)
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=fr) == 1
+    assert gh.calls == [] and not any(k.startswith("FASTCI_") for k in a.envs[0])
+    assert not (tmp_path / HISTORY).exists() and not (tmp_path / ex.FLAGGED).exists()
+
+
 def test_with_marks_nothing_is_called_and_the_mark_line_prints(monkeypatch, tmp_path, capsys):
     gh = FakeIssues(monkeypatch)
     in_ci(monkeypatch, "refs/pull/7/merge")

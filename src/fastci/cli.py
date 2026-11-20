@@ -213,6 +213,12 @@ def _run(args) -> int:
     if not steps:
         say("nothing to check here: no project with checks or tests was found")
         return 0
+    retries = cfg.retries_for(ctx.tier)
+    flagger = (
+        Flagger(cfg.flaky, ctx, root, repo_of(root), _token(ctx), cfg.default_branch)
+        if retries
+        else None
+    )
     return execute(
         steps,
         root,
@@ -221,12 +227,7 @@ def _run(args) -> int:
         fail_fast_tests=ctx.spec.fail_fast,
         wrap=caps["wrap"],
         cap_note=caps["note"],
-        flaky=FlakyRun(
-            cfg.flaky,
-            cfg.retries_for(ctx.tier),
-            reach,
-            Flagger(cfg.flaky, ctx, root, repo_of(root), _token(ctx), cfg.default_branch),
-        ),
+        flaky=FlakyRun(cfg.flaky, retries, reach, flagger),
     )
 
 
