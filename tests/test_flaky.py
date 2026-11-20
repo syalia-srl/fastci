@@ -161,6 +161,32 @@ def test_history_keeps_the_entries_it_can_read_and_ignores_unknown_keys(tmp_path
     assert History.load(p) == h
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"clean": "3"},
+        {"clean": True},
+        {"clean": 2.0},
+        {"landed": 1},
+        {"landed_sha": 7},
+        {"main": [0, True]},
+        {"main": [0, 1.0]},
+        {"main": "01"},
+        {"issue": "18"},
+        {"issue": True},
+        {"first": "abc"},
+        {"last_failure": []},
+    ],
+)
+def test_history_drops_an_entry_with_a_field_of_the_wrong_type(tmp_path, bad):
+    # A hand-edited artifact must not crash the run after its stages and lose the summary.
+    p = tmp_path / "flaky.json"
+    good = {"main": [0, 1], "clean": 2, "landed": True, "landed_sha": "abc", "issue": 4}
+    tests = {"t.py::bad": {**good, **bad}, "t.py::good": good}
+    p.write_text(json.dumps({"version": 1, "tests": tests}))
+    assert set(History.read(p).tests) == {"t.py::good"}
+
+
 @pytest.mark.parametrize("content", ["{not json", '{"version": 1, "tests": 3}', "[]"])
 def test_history_read_refuses_a_file_that_is_not_one(tmp_path, content):
     p = tmp_path / "flaky.json"
@@ -179,3 +205,58 @@ def test_history_round_trips_node_ids(tmp_path):
     data = json.loads(p.read_text())
     assert data["version"] == 1 and set(data["tests"]) == set(ids)
     assert History.load(p) == h
+
+
+def streak(h: History, runs: int, reached_at: int | None = None, fail_at: int | None = None):
+    """Whether each of ``runs`` runs on main unflags t::a: a reaching change lands at
+    run ``reached_at``, and run ``fail_at`` fails."""
+    return [h.unflag_due("t::a", i == reached_at, i == fail_at, 20) for i in range(1, runs + 1)]
+
+
+def test_a_clean_streak_without_a_reaching_change_never_unflags():
+    assert not any(streak(History(), 40))
+
+
+def test_a_reaching_change_then_20_clean_runs_unflags_on_the_20th():
+    assert streak(History(), 20, reached_at=1) == [False] * 19 + [True]
+
+
+def test_a_failure_on_the_19th_restarts_the_count():
+    due = streak(History(), 39, reached_at=1, fail_at=19)
+    assert due.index(True) == 38  # 20 clean runs after the 19th, which failed
+
+
+def test_a_failure_does_not_undo_the_landing():
+    h = History()
+    h.unflag_due("t::a", True, True, 20)
+    assert h.tests["t::a"].landed and h.tests["t::a"].clean == 0
+
+
+def test_unflag_after_zero_never_unflags():
+    h = History()
+    assert not any(h.unflag_due("t::a", True, False, 0) for _ in range(40))
+
+
+def test_the_first_reaching_run_records_its_commit():
+    h = History()
+    h.unflag_due("t::a", False, False, 20, "s0")
+    h.unflag_due("t::a", True, False, 20, "s1")
+    h.unflag_due("t::a", True, False, 20, "s2")
+    assert h.tests["t::a"].landed_sha == "s1"
+
+
+def test_the_landing_commit_round_trips_and_old_files_load_none(tmp_path):
+    p = tmp_path / "flaky.json"
+    h = History()
+    h.unflag_due("t::a", True, False, 20, "s1")
+    h.save(p)
+    assert History.load(p).tests["t::a"].landed_sha == "s1"
+    p.write_text(json.dumps({"version": 1, "tests": {"t::a": {"main": [0], "landed": True}}}))
+    assert History.load(p).tests["t::a"].landed_sha is None
+
+
+def test_lands_only_through_a_diff_rule():
+    reach = Reach(frozenset({"t::a"}), frozenset({"t2"}), known=frozenset({"t::a", "t2::b"}))
+    assert reach.lands("t::a") and reach.lands("t2::b")
+    assert "t::new" in reach and not reach.lands("t::new")  # unknown to the map
+    assert "t::a" in Reach.everything() and not Reach.everything().lands("t::a")

@@ -4,7 +4,8 @@ One JSON line per event: ``started`` before a test, ``outcome`` for each failed
 phase and for the call phase, ``finished`` after it, ``crashed`` when an
 xdist worker died running it, and ``session`` when pytest ended: the failures
 it counted and whether it stopped early. An outcome line of a test flagged as
-flaky carries ``flagged`` (its issue number, or true) and the real outcome; pytest
+flaky carries ``flagged`` (its issue number, or true), ``marked`` when the mark
+flags it, and the real outcome; pytest
 counted its failure as an expected one, so it is not in ``failed``.
 """
 
@@ -34,6 +35,7 @@ class Results:
     errors: dict[str, str] = field(default_factory=dict)
     outcomes: dict[str, str] = field(default_factory=dict)
     flagged: dict[str, int | None] = field(default_factory=dict)  # flaky test: its issue
+    marked: set[str] = field(default_factory=set)  # flagged tests that carry the mark
     failed_reports: int = 0  # failed outcome lines; a test may fail in call and teardown
     testsfailed: int | None = None  # pytest's own count; None: the session never ended
     stopped: bool = False  # pytest stopped before running every test (-x, --maxfail)
@@ -80,6 +82,8 @@ def read(path: str, signalled: bool) -> Results | None:
                 if "flagged" in ev:
                     flagged = ev["flagged"]
                     r.flagged[nodeid] = None if flagged is True else flagged
+                if ev.get("marked"):
+                    r.marked.add(nodeid)
                 if ev["outcome"] == "failed":
                     # pytest counted a flagged test's failure as an expected one.
                     if nodeid not in r.flagged:

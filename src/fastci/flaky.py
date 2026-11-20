@@ -25,6 +25,13 @@ class Reach:
             return True
         return nodeid in self.tests or nodeid.split("::")[0] in self.files or self.unmapped(nodeid)
 
+    def lands(self, nodeid: str) -> bool:
+        """Whether a diff rule named the test: never through ``everything()`` or a
+        test the map does not know, which count as reached only when judging."""
+        return self.tests is not None and (
+            nodeid in self.tests or nodeid.split("::")[0] in self.files
+        )
+
     def unmapped(self, nodeid: str) -> bool:
         """A test the map does not know (marked, skipped where it was recorded, or
         added since): fastci cannot tell what reaches it."""
@@ -143,6 +150,25 @@ class Entry:
     issue: int | None = None
     landed: bool = False  # a change that reaches the test has landed on main
     clean: int = 0  # runs on main without a failure since it landed
+    landed_sha: str | None = None  # the commit of the main run whose reach first held it
+    # landed, clean and landed_sha restart when the test flakes again or its issue is
+    # closed or reopened: a flag that comes back needs a new reaching change.
+
+    def restart(self) -> None:
+        self.landed, self.clean, self.landed_sha = False, 0, None
+
+
+def _typed(e: Entry) -> bool:
+    """Whether every field holds its type; bool is not an int here, nor an int a bool."""
+    return (
+        isinstance(e.main, list)
+        and all(type(x) is int and x in (0, 1) for x in e.main)
+        and all(w is None or isinstance(w, dict) for w in (e.first, e.last_failure))
+        and (e.issue is None or type(e.issue) is int)
+        and type(e.landed) is bool
+        and type(e.clean) is int
+        and (e.landed_sha is None or isinstance(e.landed_sha, str))
+    )
 
 
 @dataclass
@@ -155,7 +181,8 @@ class History:
     @classmethod
     def read(cls, path: str | Path) -> History:
         """The history in ``path``; OSError or ValueError when it is not one. An entry
-        it cannot read is left out, and a key it does not know is ignored."""
+        it cannot read, or with a field of the wrong type, is left out, and a key it
+        does not know is ignored."""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("tests"), dict):
             raise ValueError(f"{path} is not a flaky history")
@@ -164,7 +191,7 @@ class History:
         for t, e in data["tests"].items():
             if isinstance(e, dict):
                 entry = Entry(**{k: v for k, v in e.items() if k in known})
-                if isinstance(entry.main, list) and all(x in (0, 1) for x in entry.main):
+                if _typed(entry):
                     tests[t] = entry
         return cls(tests)
 
@@ -190,6 +217,22 @@ class History:
             e.first = e.first or where
             e.last_failure = where
         return e
+
+    def unflag_due(
+        self, id: str, reached: bool, failed: bool, unflag_after: int, sha: str = ""
+    ) -> bool:
+        """Count one run on main of a flagged test toward leaving the list: whether a
+        change that reaches it has landed and main has since run it ``unflag_after``
+        times in a row without a failure. 0 never unflags. ``sha``: this run's commit,
+        kept when its reach is the first to hold the test."""
+        e = self.tests.setdefault(id, Entry())
+        if reached and not e.landed:
+            e.landed, e.landed_sha = True, sha or None
+        if failed:
+            e.clean = 0
+        elif e.landed:
+            e.clean += 1
+        return unflag_after > 0 and e.clean >= unflag_after
 
     def rate(self, id: str) -> tuple[int, int]:
         """(failed, runs) on main."""

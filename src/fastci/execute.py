@@ -74,6 +74,8 @@ def execute(
                 code = adapter.run_tests(project, root, s.select, args, env, wrap)
             else:
                 code = _judged(adapter, project, root, s.select, args, wrap, flaky, cap_note, env)
+                if flaky.flagger is not None:
+                    flaky.flagger.say_stage()
             code = 0 if code == 5 else code
         else:
             cwd = os.path.join(root, project.root)
@@ -84,10 +86,46 @@ def execute(
             say(f"{s.stage} failed (exit {code}){tail}")
             if cap_note and killed_by_cap(code):
                 say(cap_note)
+            _finish(flaky)
             return code
         ran += 1
     say(f"{ran} stages passed, {skipped} skipped")
+    _finish(flaky)
     return 0
+
+
+def _finish(flaky: FlakyRun | None) -> None:
+    if flaky is not None and flaky.flagger is not None:
+        flaky.flagger.finish(flaky.reach)
+
+
+def summary(
+    verdicts: list[Verdict],
+    flagged_outcomes: dict[str, bool],
+    issues_by_id: dict[str, int],
+    url: str,
+    since: str = "",
+) -> str:
+    """The job summary's table: one row per judged test, red or green and the first line
+    of its verdict as the run prints it, then one per flagged test that ran
+    (``flagged_outcomes``: whether it failed). ``url`` + number links an issue."""
+
+    def row(id: str, blocks: bool, verdict: str) -> str:
+        n = issues_by_id.get(id)
+        test = id.replace("|", "\\|")  # a | in a node id would end the cell
+        # A fence longer than any run of backticks in the id, which may then not touch it.
+        ticks = max(map(len, re.findall("`+", test)), default=0)
+        fence, pad = "`" * (ticks + 1), " " if ticks else ""
+        return (
+            f"| {fence}{pad}{test}{pad}{fence} | {'red' if blocks else 'green'} | {verdict}"
+            f" | {f'[#{n}]({url}{n}) ' if n else ''}|"
+        )
+
+    rows = [row(v.id, v.blocks, verdict_lines(v, since)[0]) for v in verdicts]
+    for id, failed in sorted(flagged_outcomes.items()):
+        rows.append(row(id, False, f"flagged, {'failed' if failed else 'passed'}"))
+    head = ["| test | result | verdict | issue |", "|---|---|---|---|"]
+    return "\n".join([*head, *rows]) + "\n"
 
 
 INDENT = "\n" + " " * 10
@@ -96,6 +134,11 @@ INDENT = "\n" + " " * 10
 def say_verdict(v: Verdict, store: str, since: str = "", notes: Sequence[str] = ()) -> None:
     """``since``: on main, the last green run's sha the judged diff starts at; ``notes``:
     the flag's lines, which close the verdict's block."""
+    say(INDENT.join([v.id, *verdict_lines(v, since), *notes]))
+
+
+def verdict_lines(v: Verdict, since: str = "") -> list[str]:
+    """The verdict's lines, in the spec's wording."""
     if v.kind == "crashed":
         how = f" with {v.why}" if v.why else ""
         lines = [f"killed its process{how}: a fault in the code or the machine, not a flake"]
@@ -121,7 +164,7 @@ def say_verdict(v: Verdict, store: str, since: str = "", notes: Sequence[str] = 
             f"failed, then passed; {nothing}",
             "passed in a fresh process: it may depend on test order",
         ]
-    say(INDENT.join([v.id, *lines, *notes]))
+    return lines
 
 
 def _signal_name(code: int) -> str:
@@ -258,13 +301,17 @@ class Flagger:
         self.issues: dict[str, issues.Issue] | None = None  # None: not read
         self.history: History | None = None  # on main only
         self.recorded: dict[str, bool] = {}  # this run's outcome per test: failed
+        self.judged: list[Verdict] = []
+        self.ran: dict[str, bool] = {}  # the flagged tests that ran: failed in any stage
+        self.numbers: dict[str, int] = {}  # the issue each flagged test's mark names
+        self.marked: set[str] = set()  # the flagged tests that ran with the mark on them
+        self.stage: dict[str, tuple[bool, int | None]] = {}  # this stage's: failed, issue
         self.laptop = ctx.spec.capped
         env = os.environ
         ref = env.get("GITHUB_REF", "")
-        ci = ctx.ci and not self.laptop
+        ci = self.ci = ctx.ci and not self.laptop
         # Main is the push to the default branch: it writes the history and the bodies.
-        push = env.get("GITHUB_EVENT_NAME") == "push"
-        self.main = ci and push and ref == f"refs/heads/{default_branch}"
+        self.main = on_main(ctx, default_branch)
         # Anywhere else in CI a flake adds an occurrence: "#7" on a pull request, else the ref.
         m = re.fullmatch(r"refs/pull/(\d+)/merge", ref)
         where = f"#{m.group(1)}" if m else env.get("GITHUB_REF_NAME") or ref
@@ -341,6 +388,15 @@ class Flagger:
     ) -> dict[str, list[str]]:
         """Flag each test the verdicts forgave; on main, add this run to the history.
         Returns the lines that close each forgiven test's verdict block."""
+        self.judged += verdicts
+        for id, number in res.flagged.items():
+            if id in res.outcomes:
+                self.ran[id] = self.ran.get(id, False) or res.outcomes[id] == "failed"
+                self.stage[id] = (res.outcomes[id] == "failed", number)
+                if number:
+                    self.numbers[id] = number
+                if id in res.marked:
+                    self.marked.add(id)
         flaky = [v.id for v in verdicts if v.kind == "flaky"]
         changed = self._record(flaky, res) if self.history is not None else set()
         notes: dict[str, list[str]] = {}
@@ -372,6 +428,78 @@ class Flagger:
             self.history.save(os.path.join(self.root, HISTORY))
         return notes
 
+    def say_stage(self) -> None:
+        """Name the flagged tests the stage ran, with their outcomes."""
+        if not self.stage:
+            return
+        n = len(self.stage)
+        each = [
+            f"{id} {'failed' if failed else 'passed'}" + (f" (#{number})" if number else "")
+            for id, (failed, number) in sorted(self.stage.items())
+        ]
+        say(f"{n} flagged test{'s' if n > 1 else ''} ran: {', '.join(each)}")
+        self.stage = {}
+
+    def finish(self, reach: Reach) -> None:
+        """After the last stage: on main, unflag what left the list and save the
+        history; in CI, append the table and the flag lines to the job summary."""
+        if self.history is not None:
+            for id, e in self.history.tests.items():
+                issue = (self.issues or {}).get(id)
+                if id not in self.ran and issue is not None and not issue.open:
+                    e.restart()  # closed by hand: a reopen must not resume the streak
+            for id in sorted(self.ran):
+                self._unflag(id, reach.lands(id))
+            self.history.save(os.path.join(self.root, HISTORY))
+        path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if not (self.ci and path) or not (self.judged or self.ran or self.lines):
+            return
+        numbers = {**self.numbers, **{id: i.number for id, i in (self.issues or {}).items()}}
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+        url = f"{server}/{self.repo}/issues/"
+        text = summary(self.judged, self.ran, numbers, url, reach.since)
+        notes = "".join(f"- {line}\n" for line in self.lines)
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"\n### fastci: flaky tests\n\n{text}" + (f"\n{notes}" if notes else ""))
+        except OSError as e:
+            say(f"could not write the job summary: {e}")
+
+    def _unflag(self, id: str, reached: bool) -> None:
+        """Count this run toward ``id`` leaving the list; close its flag when due."""
+        assert self.history is not None
+        due = self.history.unflag_due(id, reached, self.ran[id], self.cfg.unflag_after, self.sha)
+        if not due:
+            return
+        entry = self.history.tests[id]
+        # An open issue, read under "issues" or "both", and the mark flag a test in any
+        # store: fastci closes the one and says the other can go.
+        if self.cfg.store in ("issues", "both"):
+            if self.issues is None:
+                self._say(f"could not unflag {id}: the flaky issues could not be read")
+                return
+            issue = self.issues.get(id)
+            if issue is not None and issue.open:
+                at = f" ({entry.landed_sha[:7]})" if entry.landed_sha else ""
+                text = (
+                    f"Passed {entry.clean} runs on main in a row since a change that reaches"
+                    f" it landed{at}. Unflagged."
+                )
+                try:  # closed first: a refused close posts nothing, and the next run retries
+                    issues.set_open(self.repo, self.token, issue.number, False)
+                except Exception as e:
+                    self._say(f"could not unflag {id}: {e}")
+                    return
+                self.issues[id] = issues.Issue(issue.number, False)
+                try:
+                    issues.comment(self.repo, self.token, issue.number, text)
+                except Exception as e:
+                    self._say(f"could not comment on #{issue.number}: {e}")
+                self._say(f"{id}: unflagged, #{issue.number} closed")
+        if id in self.marked:
+            self._say(f"the mark @pytest.mark.{self.cfg.mark} on {id} can go")
+        entry.restart()
+
     def _record(self, flaky: list[str], res: results.Results) -> set[str]:
         """Add the flagged tests' outcomes and the flakes to the history: the
         flagged tests whose rate changed."""
@@ -386,6 +514,7 @@ class Flagger:
                     changed.add(id)
         for id in flaky:
             self._add(id, True, res, date)
+            self.history.tests[id].restart()  # flagged again: an old landing no longer counts
         return changed
 
     def _add(self, id: str, failed: bool, res: results.Results, date: str) -> None:
@@ -399,6 +528,10 @@ class Flagger:
             entry.main = entry.main[:-1]  # this run's pass becomes its failure
         self.history.record(id, failed, self._where(id, res, date))
         self.recorded[id] = failed
+
+    def _link(self) -> str:
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+        return f"[run {self.run}]({server}/{self.repo}/actions/runs/{self.run})"
 
     def _where(self, id: str, res: results.Results, date: str) -> dict:
         return {"sha": self.sha, "run": self.run, "date": date, "error": res.errors.get(id, "")}
@@ -425,13 +558,18 @@ class Flagger:
                     issues.set_open(repo, token, number, True)
                 if self.main and self.history is not None:
                     issues.edit(repo, token, number, text)
+                if self.main and not issue.open:
+                    again = (
+                        f"Failed and then passed again on main at {self.sha[:7]} ({self._link()})."
+                    )
+                    issues.comment(repo, token, number, again)
             self.issues[id] = issues.Issue(number, True)
             if self.history is not None:
                 entry.issue = number
             if self.where:
-                server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
-                link = f"[run {self.run}]({server}/{repo}/actions/runs/{self.run})"
-                when = f"Failed and then passed on {self.where} at {self.head[:7]} ({link})."
+                when = (
+                    f"Failed and then passed on {self.where} at {self.head[:7]} ({self._link()})."
+                )
                 issues.comment(repo, token, number, when)
         except Exception as e:
             line = f"could not write the flag for {id}: {e}"
@@ -440,6 +578,24 @@ class Flagger:
         line = f"flagged as flaky: #{number}{how}"
         self.lines.append(f"{id}: {line}")
         return number, line
+
+
+def on_main(ctx: Context, default_branch: str) -> bool:
+    """Whether this is CI's push to the default branch, the run that writes the history."""
+    env = os.environ
+    push = env.get("GITHUB_EVENT_NAME") == "push"
+    ref = env.get("GITHUB_REF", "")
+    return ctx.ci and not ctx.spec.capped and push and ref == f"refs/heads/{default_branch}"
+
+
+def drop_stale_history(root: str, ctx: Context, default_branch: str) -> None:
+    """On main, remove the history an earlier run left in a kept workspace: the upload
+    must carry this run's or none, never an older copy."""
+    if on_main(ctx, default_branch):
+        try:
+            os.remove(os.path.join(root, HISTORY))
+        except FileNotFoundError:
+            pass
 
 
 def _head_sha() -> str | None:

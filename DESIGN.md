@@ -27,7 +27,12 @@ including the adapters, suites and end-to-end maps still to come, is
 - **The plugin** (`fastci.python.plugin`) runs inside pytest. When recording, it puts
   each test's id where a child process can read it and notes every repository
   file a test opens, through Python's audit hook on `open`. When running, it
-  deselects the tests that were not picked.
+  deselects the tests that were not picked. It writes a results file for fastci:
+  each test as it starts and its outcome, and at the end the failures pytest
+  counted and whether it stopped early, so a test with a start and no outcome
+  is the one a crash killed. It reads the flagged tests (the flagged file
+  fastci writes and the flag mark) and reports a flagged test's failure as an
+  expected one, or deselects it.
 - **The subprocess hook** (`_subprocess/sitecustomize.py`) runs in every Python
   child a test starts while recording: it labels that child's coverage with the
   test and notes the files the child opens.
@@ -38,6 +43,13 @@ including the adapters, suites and end-to-end maps still to come, is
   per test, its duration.
 - **pick** reads a git diff and the map and applies the rules in the book (`docs/chapters/04-why-a-test-ran.md`).
 - **fetch** downloads the newest map that main's CI uploaded.
+- **The flaky module** (`fastci.flaky`) says what a change reaches (`Reach`),
+  judges each test that failed and then passed (`judge`, one `Verdict` per
+  test) and keeps main's history of flagged and forgiven tests (`History`,
+  the `fastci-flaky` artifact). `fastci.execute` retries the failed tests and
+  calls it; its `Flagger` reads and writes the flags around the test stages.
+- **The issues module** (`fastci.issues`) keeps one GitHub issue per flagged
+  test, found by the node id in a marker line of its body, never by title.
 
 ## Rules and their reasons
 
@@ -49,6 +61,14 @@ including the adapters, suites and end-to-end maps still to come, is
   was a rule's fault, when the rule gets a fixture case.
 - **Recording never gates.** Recording slows the suite (43% and 100% on the two
   repositories measured), and timing-sensitive tests can fail under it.
+- **A retry never forgives what the change reaches.** A test that fails and
+  then passes is green only when the change (on main, the commits since the
+  last green run) does not reach it, it did not crash its process, and fewer
+  than `machine-threshold` tests (three by default) passed on the retry. A race
+  a change brings in shows up as a flake, so forgiving every pass on retry
+  would merge it; a broken runner fails the same way every time, so the retry
+  runs on the same machine. When fastci cannot tell what a change reaches,
+  every test counts as reached.
 - **`global_share` is off by default.** When almost every test boots the same
   server, almost every function is "run" by almost every test, and line-level
   selection still picks most of the suite. `global_share` narrows a unit that

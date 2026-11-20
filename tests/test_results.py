@@ -400,3 +400,20 @@ def test_no_file_is_none(tmp_path):
 )
 def test_signalled(code, yes):
     assert results.signalled(code) is yes
+
+
+def test_the_results_say_which_flagged_tests_carry_the_mark(pytester, tmp_path, monkeypatch):
+    # Leaving the list, a mark must be removed by hand and an issue closed by fastci.
+    out = _flag(tmp_path, monkeypatch, {"test_m.py::test_ok": 3, "test_m.py::test_str": 776})
+    monkeypatch.setenv("FASTCI_FLAKY_MARK", "quarantine")
+    pytester.makeini("[pytest]\nmarkers =\n    hold: a project's own mark\n")
+    pytester.makepyfile(test_m=MARKED)
+    pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist", "-k", "not other")
+    r = results.read(str(out), signalled=False)
+    assert set(r.flagged) == {
+        "test_m.py::test_ok",
+        "test_m.py::test_str",
+        "test_m.py::test_int",
+        "test_m.py::test_bare",
+    }
+    assert r.marked == {"test_m.py::test_str", "test_m.py::test_int", "test_m.py::test_bare"}

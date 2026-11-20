@@ -18,15 +18,31 @@
 - Only SIGABRT, SIGBUS, SIGSEGV, SIGKILL, SIGILL and SIGFPE blame the test
   that was running; SIGTERM and SIGINT do not.
 - `[tool.fastci.flaky]`: `retries`, `machine-threshold`, `reach-share`,
-  `forgive-reached`; a tier table takes `retries`. A value of the wrong type or
-  out of range is a config error naming its key.
+  `forgive-reached`, `store`, `label`, `mark`, `flagged`, `unflag-after`; a
+  tier table takes `retries`. A value of the wrong type or out of range is a
+  config error naming its key.
 - A forgiven test is flagged: as a GitHub issue labelled `flaky`, as a
-  `quarantine` mark fastci asks you to add, or both (`store`, `label`, `mark`,
-  `flagged`). A flagged test still runs, but its failure no longer blocks. Each
-  push to the default branch records the flagged and forgiven tests' outcomes,
-  once per run, in the `fastci-flaky` artifact; a history that exists but
-  cannot be fetched or read is left as it was. `retries = 0` turns flags off
-  on that tier, and a laptop reads the flags within 5 seconds.
+  `quarantine` mark fastci asks you to add, or both. A flagged test still runs,
+  but its failure no longer blocks and is not retried; with `flagged = "skip"`
+  pull requests and laptops leave it out. Each push to the default branch
+  records the flagged and forgiven tests' outcomes, once per run, in the
+  `fastci-flaky` artifact; a history that exists but cannot be fetched or read
+  is left as it was. `retries = 0` turns flags off on that tier. A laptop reads
+  the flags within 5 seconds, keeps a copy for when it is offline, and never
+  writes a flag or the history.
+- A flagged test leaves the list when its issue is closed, or when a change
+  that reaches it has landed on main and main has then run it `unflag-after`
+  times in a row (20) without a failure: fastci closes its issue with a
+  comment, and says its mark can go when a mark flags it, whatever the store.
+  Only a diff rule that names the test lands it, never a run where everything
+  counts as reached or a test the map does not know; a flag that comes back
+  needs a new landing. A streak alone never unflags a test.
+- Each test stage names the flagged tests it ran and their outcomes. A push to
+  main removes a history an earlier run left in the workspace, and an entry
+  with a field of the wrong type is dropped.
+- Nothing GitHub answers changes a verdict: a refused write, a missing token or
+  a timeout costs one line. In GitHub Actions the job summary gets a table of
+  the judged and flagged tests, red or green, with their issues.
 - The book: a chapter on flaky tests.
 
 ## 0.2.1
