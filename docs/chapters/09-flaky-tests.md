@@ -151,15 +151,18 @@ fastci: tests/test_links.py::test_reads_across_a_link
 fastci: tests/test_api.py::test_upload_resumes
           failed, then passed; the commits since 9f8e7d6 reach it through src/api/upload.py:resume
           red: check for a race in what those commits touched
+fastci: 1 flagged test ran: tests/test_terminals.py::test_ctrl_c passed (#18)
 fastci: tests failed (exit 1)
 fastci: tests/test_terminals.py::test_ctrl_c: unflagged, #18 closed
 ```
 
-In GitHub Actions the same run adds a table to the job summary, one row per judged test with the first line of its verdict and a link to its issue, then one row per flagged test that ran, `flagged, passed` or `flagged, failed`. The lines about the flags follow the table: an issue opened, a mark to add, a write GitHub refused.
+Each test stage ends with one line naming the flagged tests it ran, with their outcomes and issues.
+
+In GitHub Actions the same run adds a table to the job summary, one row per judged test with `red` or `green`, the first line of its verdict and a link to its issue, then one row per flagged test that ran, `green` and `flagged, passed` or `flagged, failed`. The lines about the flags follow the table: an issue opened, a mark to add, a write GitHub refused.
 
 ## Leaving the list
 
-A flagged test leaves the list when its issue is closed, by hand or by a pull request that says "fixes #N", or when fastci closes it. fastci closes it on main, after two things in this order: a push whose commits since the last green run reach the test lands on main, and main then runs the test `unflag-after` times in a row (20 by default) without a failure. A failure restarts the count but keeps the landing, so the next 20 clean runs are enough. fastci closes the issue with a comment naming the streak and the commit that reached the test:
+A flagged test leaves the list when its issue is closed, by hand or by a pull request that says "fixes #N", or when fastci closes it. fastci closes it on main, after two things in this order: a push whose commits since the last green run reach the test lands on main, and main then runs the test `unflag-after` times in a row (20 by default) without a failure. Only a rule that names the test lands it: a line of code it runs or its own test file. A run where every test counts as reached (a lockfile change, no map) or a test the map does not know lands nothing. A failure restarts the count but keeps the landing, so the next 20 clean runs are enough. A flag that comes back, because the test failed and then passed again or its issue was closed, drops its landing and needs a new change that reaches it. fastci closes the issue with a comment naming the streak and the head of the first push whose commits reached the test:
 
 ```text
 Passed 20 runs on main in a row since a change that reaches it landed (4c5d6e7). Unflagged.
@@ -167,7 +170,7 @@ Passed 20 runs on main in a row since a change that reaches it landed (4c5d6e7).
 
 A streak alone never unflags a test. One that fails 6% of the time passes 20 runs in a row 29% of the time, and would flap between flagged and blocking. A change that reaches it is the sign that someone worked on it.
 
-With `store = "marks"` fastci cannot remove the mark, so the run and the job summary say `the mark on tests/test_terminals.py::test_ctrl_c can go`. If the test fails and then passes again later, its closed issue reopens with a comment. `unflag-after = 0` never unflags: only closing the issue or removing the mark does.
+fastci cannot remove a mark, so when the mark flags a test that leaves the list, whatever the store, the run and the job summary say `the mark @pytest.mark.quarantine on tests/test_terminals.py::test_ctrl_c can go`. A test flagged by both an issue and the mark gets both: the issue closed and the line. A test flagged only by its issue is not told about a mark. If the test fails and then passes again later, its closed issue reopens with a comment. `unflag-after = 0` never unflags: only closing the issue or removing the mark does.
 
 ## On a laptop
 
@@ -219,4 +222,4 @@ The issues opened by hand carry no marker line, so fastci does not find them: it
 
 ## How it is built
 
-`FlakyConfig` holds the settings above. The pytest plugin writes a results file during the run, which `Results` reads: the tests that failed, the one that was running when the process died, and, when the session ends, the failures pytest counted and whether it stopped early. `Reach` is what a change reaches, built from the pick, and `judge` turns the failures, the retry and the reach into one `Verdict` per test, following the table above. `FlakyRun` carries the settings, the number of retries and the reach to the test stages, with a `Flagger` that reads the flags before the first test stage and writes them after each verdict, through the `issues` module, which finds each test's `Issue` by its marker, and the `History` of main's outcomes, one `Entry` per test. The entry also keeps whether a change that reaches the test has landed and how many clean runs followed it; after the last stage, the `Flagger` closes the flags that are due and appends its table to the job summary.
+`FlakyConfig` holds the settings above. The pytest plugin writes a results file during the run, which `Results` reads: the tests that failed, the one that was running when the process died, and, when the session ends, the failures pytest counted and whether it stopped early. `Reach` is what a change reaches, built from the pick, and `judge` turns the failures, the retry and the reach into one `Verdict` per test, following the table above. `FlakyRun` carries the settings, the number of retries and the reach to the test stages, with a `Flagger` that reads the flags before the first test stage and writes them after each verdict, through the `issues` module, which finds each test's `Issue` by its marker, and the `History` of main's outcomes, one `Entry` per test. The entry also keeps whether a change that reaches the test has landed (`Reach.lands`: a diff rule named it) and how many clean runs followed it; a push to main first removes any history an earlier run left in the workspace, so the upload never carries an old copy; after the last stage, the `Flagger` closes the flags that are due and appends its table to the job summary.

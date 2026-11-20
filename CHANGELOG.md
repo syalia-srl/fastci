@@ -32,11 +32,17 @@
   writes a flag or the history.
 - A flagged test leaves the list when its issue is closed, or when a change
   that reaches it has landed on main and main has then run it `unflag-after`
-  times in a row (20) without a failure: fastci closes the issue with a
-  comment, or says the mark can go. A streak alone never unflags a test.
+  times in a row (20) without a failure: fastci closes its issue with a
+  comment, and says its mark can go when a mark flags it, whatever the store.
+  Only a diff rule that names the test lands it, never a run where everything
+  counts as reached or a test the map does not know; a flag that comes back
+  needs a new landing. A streak alone never unflags a test.
+- Each test stage names the flagged tests it ran and their outcomes. A push to
+  main removes a history an earlier run left in the workspace, and an entry
+  with a field of the wrong type is dropped.
 - Nothing GitHub answers changes a verdict: a refused write, a missing token or
   a timeout costs one line. In GitHub Actions the job summary gets a table of
-  the judged and flagged tests with their issues.
+  the judged and flagged tests, red or green, with their issues.
 - The book: a chapter on flaky tests.
 
 ## 0.2.1
