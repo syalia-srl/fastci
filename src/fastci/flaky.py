@@ -16,21 +16,33 @@ class Reach:
     files: frozenset[str] = frozenset()  # test files reached whole
     why: dict[str, str] = field(default_factory=dict)  # "*": why every test is reached
     since: str = ""  # on main, the sha of the last green run the diff starts at
+    known: frozenset[str] | None = None  # the map's tests; None: not checked
 
     def __contains__(self, nodeid: str) -> bool:
         if self.tests is None:
             return True
-        return nodeid in self.tests or nodeid.split("::")[0] in self.files
+        return nodeid in self.tests or nodeid.split("::")[0] in self.files or self.unmapped(nodeid)
+
+    def unmapped(self, nodeid: str) -> bool:
+        """A test the map does not know (marked, skipped where it was recorded, or
+        added since): fastci cannot tell what reaches it."""
+        return self.known is not None and nodeid not in self.known
 
     @classmethod
     def everything(cls, why: str = "") -> Reach:
         return cls(None, why={"*": why} if why else {})
 
 
-def reach_of(pick: Pick | None, changed_tests: set[str], share: float) -> Reach:
+def reach_of(
+    pick: Pick | None,
+    changed_tests: set[str],
+    share: float,
+    known: frozenset[str] | None = None,
+) -> Reach:
     """What ``pick`` reaches: tests behind a unit at most ``share`` of the suite ran,
-    and changed test files. No pick (no map, no merge-base) reaches everything, and so
-    does a full pick, through the path that changed."""
+    changed test files, and tests not ``known`` to the map. No pick (no map, no
+    merge-base) reaches everything, and so does a full pick, through the path that
+    changed."""
     if pick is None:
         return Reach.everything()
     if pick.full:
@@ -41,10 +53,12 @@ def reach_of(pick: Pick | None, changed_tests: set[str], share: float) -> Reach:
         tests,
         frozenset(files | changed_tests),
         {t: pick.why[t] for t in tests if t in pick.why},
+        known=known,
     )
 
 
 UNJUDGEABLE = "fastci cannot tell what this change reaches"
+UNMAPPED = "the map does not know this test"
 
 
 @dataclass(frozen=True)
@@ -78,6 +92,8 @@ def judge(
         elif t in reach and not cfg.forgive_reached:
             if reach.tests is None:
                 why = reach.why.get("*", UNJUDGEABLE)
+            elif t not in reach.tests and t.split("::")[0] not in reach.files:
+                why = UNMAPPED
             else:
                 why = reach.why.get(t, t.split("::")[0])
             verdicts.append(Verdict(t, "reached", True, why))

@@ -38,6 +38,15 @@ def test_files_listed_in_always_do_not_reach():
     assert "tests/test_always.py::t" in reach_of(p, {"tests/test_always.py"}, 0.2)
 
 
+def test_a_test_the_map_does_not_know_is_reached():
+    r = reach_of(
+        pick({"t.py::a": 0.05, "t.py::b": 0.9}), set(), 0.2, frozenset({"t.py::a", "t.py::b"})
+    )
+    assert "t.py::b" not in r and "t.py::new" in r
+    [v] = judge(["t.py::new"], {"t.py::new"}, set(), r, FlakyConfig())
+    assert (v.kind, v.blocks, v.why) == ("reached", True, "the map does not know this test")
+
+
 NONE = Reach(frozenset())
 CFG = FlakyConfig()
 

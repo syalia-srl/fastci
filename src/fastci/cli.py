@@ -98,7 +98,9 @@ def _prepare(args):
     py = next((p for p in projects if p.adapter == "python"), None)
     if py and ctx.spec.tests != "all":
         tests = {f for f in changed or () if is_test_file(f)}
-        reach = reach_of(picks.get(py.root), tests, cfg.flaky.reach_share)
+        tm = maps.get(py.root)
+        known = frozenset(tm.tests) if tm else None
+        reach = reach_of(picks.get(py.root), tests, cfg.flaky.reach_share, known)
     elif py and since_green:
         reach = _since_green(root, cfg, ctx, maps.get(py.root))
     if caps["workers"]:
@@ -153,7 +155,8 @@ def _since_green(root, cfg, ctx, tm):
     tests = {
         f for f in git(root, "diff", "--name-only", "--no-renames", sha).split() if is_test_file(f)
     }
-    reach = reach_of(Picker(tm, root, cfg.tests).pick(sha), tests, cfg.flaky.reach_share)
+    pick = Picker(tm, root, cfg.tests).pick(sha)
+    reach = reach_of(pick, tests, cfg.flaky.reach_share, frozenset(tm.tests))
     return dataclasses.replace(reach, since=sha)
 
 

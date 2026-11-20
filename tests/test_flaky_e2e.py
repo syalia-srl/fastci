@@ -192,6 +192,26 @@ def test_main_reaches_every_test_when_a_full_path_changed(on_main, sample, capsy
     assert f"the commits since {green} reach it through pyproject.toml" in capsys.readouterr().err
 
 
+def test_main_keeps_red_a_flake_the_map_does_not_know(on_main, sample, tmp_path, capsys):
+    # Added after the map was recorded, before the last green run: outside the diff.
+    late = tmp_path / "late"
+    (sample / "tests" / "test_late.py").write_text(
+        FLAKY.format(marker=str(late)).replace("test_once", "test_late")
+    )
+    sh(sample, "git", "add", "tests/test_late.py")
+    commit(sample, "add a test the map does not know")
+    on_main["green"] = on_main["head"]()
+    calc = sample / "src" / "sample" / "calc.py"
+    calc.write_text(calc.read_text().replace("return a + b", "return b + a"))
+    commit(sample)
+    assert cli.main([]) == 1
+    err = capsys.readouterr().err
+    assert (
+        "tests/test_late.py::test_late\n          failed, then passed;"
+        " the map does not know this test, so it counts as reached" in err
+    )
+
+
 @pytest.fixture
 def behind_green(on_main, sample):
     """HEAD changes the flaky test, and a later commit on main, with a green run,
