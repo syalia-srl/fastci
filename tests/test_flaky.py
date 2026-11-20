@@ -20,9 +20,12 @@ def test_changed_test_file_reaches_all_its_tests():
     assert "tests/test_x.py::test_y[1]" in r
 
 
-def test_full_pick_reaches_only_changed_test_files():
-    r = reach_of(pick({}, full=True), {"tests/test_x.py"}, 0.2)
-    assert "tests/test_x.py::t" in r and "tests/test_z.py::t" not in r
+def test_full_pick_reaches_every_test_through_the_path_that_changed():
+    p = Pick(True, {"tests/test_z.py::t"}, set(), {"*": "uv.lock changed"})
+    r = reach_of(p, set(), 0.2)
+    assert r.tests is None and "tests/test_z.py::t" in r
+    [v] = judge(["tests/test_z.py::t"], {"tests/test_z.py::t"}, set(), r, FlakyConfig())
+    assert (v.kind, v.blocks, v.why) == ("reached", True, "uv.lock")
 
 
 def test_no_pick_reaches_everything():

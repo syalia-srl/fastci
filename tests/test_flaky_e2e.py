@@ -102,7 +102,9 @@ def test_main_keeps_a_flake_red_when_a_commit_since_green_reaches_it(on_main, sa
     assert cli.main([]) == 1
     err = capsys.readouterr().err
     assert on_main["asked"] == [("o/r", "main", ".github/workflows/fastci.yml", "9")]
-    assert "this change reaches it through tests/test_once.py" in err
+    green = on_main["green"][:7]
+    assert f"the commits since {green} reach it through tests/test_once.py" in err
+    assert "red: check for a race in what those commits touched" in err
 
 
 def test_main_forgives_a_flake_no_commit_since_green_reaches(on_main, sample, capsys):
@@ -112,18 +114,18 @@ def test_main_forgives_a_flake_no_commit_since_green_reaches(on_main, sample, ca
     commit(sample)
     on_main["marker"].unlink()
     assert cli.main([]) == 0
-    assert "failed, then passed; this change does not reach it" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "failed, then passed; no commit since the last green run reaches it" in err
 
 
-def test_main_reaches_changed_test_files_when_every_test_was_picked(on_main, sample, capsys):
+def test_main_reaches_every_test_when_a_full_path_changed(on_main, sample, capsys):
     on_main["green"] = on_main["head"]()
     (sample / "pyproject.toml").write_text((sample / "pyproject.toml").read_text() + "\n")
-    once = sample / "tests" / "test_once.py"
-    once.write_text(once.read_text().replace("fails until", "fails once until"))
     commit(sample)
     on_main["marker"].unlink()
     assert cli.main([]) == 1
-    assert "this change reaches it through tests/test_once.py" in capsys.readouterr().err
+    green = on_main["green"][:7]
+    assert f"the commits since {green} reach it through pyproject.toml" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

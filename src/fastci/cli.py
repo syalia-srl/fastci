@@ -115,6 +115,8 @@ def _prepare(args):
 def _since_green(root, cfg, ctx, tm):
     """What the commits since this workflow's last green run on this branch reach; every
     test when that run or its commit cannot be found, with one line saying why."""
+    import dataclasses
+
     from . import fetch
     from .execute import _token, repo_of, say
     from .flaky import Reach, reach_of
@@ -150,7 +152,8 @@ def _since_green(root, cfg, ctx, tm):
     tests = {
         f for f in git(root, "diff", "--name-only", "--no-renames", sha).split() if is_test_file(f)
     }
-    return reach_of(Picker(tm, root, cfg.tests).pick(sha), tests, cfg.flaky.reach_share)
+    reach = reach_of(Picker(tm, root, cfg.tests).pick(sha), tests, cfg.flaky.reach_share)
+    return dataclasses.replace(reach, since=sha)
 
 
 def _caps(cfg, ctx, projects, maps) -> dict:

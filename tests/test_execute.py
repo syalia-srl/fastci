@@ -209,6 +209,35 @@ def test_a_reached_flake_is_red(capsys):
     assert "check for a race in what the change touched" in err
 
 
+GREEN = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+
+
+def test_on_main_a_forgiven_flake_says_no_commit_since_green_reaches_it(capsys):
+    a = FakeAdapter(script=[(1, events([], ["a"])), (0, events(["a"]))])
+    assert (
+        run(
+            [tests_step()],
+            a,
+            fail_fast_tests=False,
+            flaky=flaky(reach=Reach(frozenset(), since=GREEN)),
+        )
+        == 0
+    )
+    err = capsys.readouterr().err
+    assert "a\n          failed, then passed; no commit since the last green run reaches it" in err
+    assert "this change" not in err
+
+
+def test_on_main_a_reached_flake_names_the_commits_since_green(capsys):
+    reach = Reach(frozenset({"a"}), why={"a": "src/up.py:resume"}, since=GREEN)
+    a = FakeAdapter(script=[(1, events([], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(reach=reach)) == 1
+    err = capsys.readouterr().err
+    assert "failed, then passed; the commits since 9f8e7d6 reach it through src/up.py:resume" in err
+    assert "red: check for a race in what those commits touched" in err
+    assert "this change" not in err and "the change" not in err
+
+
 def test_a_flake_nothing_can_judge_is_red(capsys):
     a = FakeAdapter(script=[(1, events([], ["a"])), (0, events(["a"]))])
     assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(reach=Reach.everything())) == 1

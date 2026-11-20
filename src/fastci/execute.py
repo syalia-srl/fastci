@@ -71,7 +71,8 @@ def execute(
 INDENT = "\n" + " " * 10
 
 
-def say_verdict(v: Verdict, store: str) -> None:
+def say_verdict(v: Verdict, store: str, since: str = "") -> None:
+    """``since``: on main, the last green run's sha the judged diff starts at."""
     if v.kind == "crashed":
         how = f" with {v.why}" if v.why else ""
         lines = [f"killed its process{how}: a fault in the code or the machine, not a flake"]
@@ -82,12 +83,19 @@ def say_verdict(v: Verdict, store: str) -> None:
     elif v.kind == "reached":
         if v.why == UNJUDGEABLE:
             lines = [f"failed, then passed; {UNJUDGEABLE}, so it counts as reached"]
+        elif since:
+            lines = [f"failed, then passed; the commits since {since[:7]} reach it through {v.why}"]
         else:
             lines = [f"failed, then passed; this change reaches it through {v.why}"]
-        lines.append("red: check for a race in what the change touched")
+        what = "those commits" if since else "the change"
+        lines.append(f"red: check for a race in what {what} touched")
     else:
+        if since:
+            nothing = "no commit since the last green run reaches it"
+        else:
+            nothing = "this change does not reach it"
         lines = [
-            "failed, then passed; this change does not reach it",
+            f"failed, then passed; {nothing}",
             "passed in a fresh process: it may depend on test order",
         ]
     say(INDENT.join([v.id, *lines]))
@@ -175,7 +183,9 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
             how = _signal_name(code)
             for v in verdicts:
                 say_verdict(
-                    dataclasses.replace(v, why=how) if v.kind == "crashed" else v, flaky.cfg.store
+                    dataclasses.replace(v, why=how) if v.kind == "crashed" else v,
+                    flaky.cfg.store,
+                    flaky.reach.since,
                 )
             if any(v.blocks for v in verdicts):
                 return code
