@@ -227,3 +227,10 @@ def test_the_landing_commit_round_trips_and_old_files_load_none(tmp_path):
     assert History.load(p).tests["t::a"].landed_sha == "s1"
     p.write_text(json.dumps({"version": 1, "tests": {"t::a": {"main": [0], "landed": True}}}))
     assert History.load(p).tests["t::a"].landed_sha is None
+
+
+def test_lands_only_through_a_diff_rule():
+    reach = Reach(frozenset({"t::a"}), frozenset({"t2"}), known=frozenset({"t::a", "t2::b"}))
+    assert reach.lands("t::a") and reach.lands("t2::b")
+    assert "t::new" in reach and not reach.lands("t::new")  # unknown to the map
+    assert "t::a" in Reach.everything() and not Reach.everything().lands("t::a")

@@ -420,7 +420,7 @@ class Flagger:
         history; in CI, append the table and the flag lines to the job summary."""
         if self.history is not None:
             for id in sorted(self.ran):
-                self._unflag(id, id in reach)
+                self._unflag(id, reach.lands(id))
             self.history.save(os.path.join(self.root, HISTORY))
         path = os.environ.get("GITHUB_STEP_SUMMARY")
         if not (self.ci and path) or not (self.judged or self.ran or self.lines):

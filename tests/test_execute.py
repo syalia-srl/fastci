@@ -846,6 +846,24 @@ def test_on_main_a_reaching_change_lands_and_counts(monkeypatch, tmp_path):
     assert ("set_open", 5, False) not in gh.writes()
 
 
+@pytest.mark.parametrize(
+    "reach",
+    [Reach.everything("uv.lock"), Reach(frozenset(), known=frozenset({"other"}))],
+    ids=["everything", "unknown-to-the-map"],
+)
+def test_on_main_only_a_diff_rule_lands_a_flagged_test(monkeypatch, tmp_path, reach):
+    # Judging counts both as reached; landing needs a rule that named the test.
+    _, gh, _, e = run_on_main(monkeypatch, tmp_path, {"main": [0] * 19, "clean": 0}, reach=reach)
+    assert (e.landed, e.clean, e.landed_sha) == (False, 0, None)
+    assert ("set_open", 5, False) not in gh.writes()
+
+
+def test_on_main_a_changed_test_file_lands_its_tests(monkeypatch, tmp_path):
+    reach = Reach(frozenset(), frozenset({"t"}), known=frozenset({"t::f"}))
+    _, _, _, e = run_on_main(monkeypatch, tmp_path, {"main": [1]}, reach=reach)
+    assert (e.landed, e.clean) == (True, 1)
+
+
 def test_on_main_a_streak_without_a_reaching_change_does_not_count(monkeypatch, tmp_path):
     _, gh, _, e = run_on_main(monkeypatch, tmp_path, {"main": [0] * 30})
     assert (e.landed, e.clean) == (False, 0)

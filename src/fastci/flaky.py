@@ -25,6 +25,13 @@ class Reach:
             return True
         return nodeid in self.tests or nodeid.split("::")[0] in self.files or self.unmapped(nodeid)
 
+    def lands(self, nodeid: str) -> bool:
+        """Whether a diff rule named the test: never through ``everything()`` or a
+        test the map does not know, which count as reached only when judging."""
+        return self.tests is not None and (
+            nodeid in self.tests or nodeid.split("::")[0] in self.files
+        )
+
     def unmapped(self, nodeid: str) -> bool:
         """A test the map does not know (marked, skipped where it was recorded, or
         added since): fastci cannot tell what reaches it."""
