@@ -209,3 +209,21 @@ def test_a_failure_does_not_undo_the_landing():
 def test_unflag_after_zero_never_unflags():
     h = History()
     assert not any(h.unflag_due("t::a", True, False, 0) for _ in range(40))
+
+
+def test_the_first_reaching_run_records_its_commit():
+    h = History()
+    h.unflag_due("t::a", False, False, 20, "s0")
+    h.unflag_due("t::a", True, False, 20, "s1")
+    h.unflag_due("t::a", True, False, 20, "s2")
+    assert h.tests["t::a"].landed_sha == "s1"
+
+
+def test_the_landing_commit_round_trips_and_old_files_load_none(tmp_path):
+    p = tmp_path / "flaky.json"
+    h = History()
+    h.unflag_due("t::a", True, False, 20, "s1")
+    h.save(p)
+    assert History.load(p).tests["t::a"].landed_sha == "s1"
+    p.write_text(json.dumps({"version": 1, "tests": {"t::a": {"main": [0], "landed": True}}}))
+    assert History.load(p).tests["t::a"].landed_sha is None

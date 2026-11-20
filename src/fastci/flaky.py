@@ -143,6 +143,7 @@ class Entry:
     issue: int | None = None
     landed: bool = False  # a change that reaches the test has landed on main
     clean: int = 0  # runs on main without a failure since it landed
+    landed_sha: str | None = None  # the commit of the main run whose reach first held it
 
 
 @dataclass
@@ -191,12 +192,16 @@ class History:
             e.last_failure = where
         return e
 
-    def unflag_due(self, id: str, reached: bool, failed: bool, unflag_after: int) -> bool:
+    def unflag_due(
+        self, id: str, reached: bool, failed: bool, unflag_after: int, sha: str = ""
+    ) -> bool:
         """Count one run on main of a flagged test toward leaving the list: whether a
         change that reaches it has landed and main has since run it ``unflag_after``
-        times in a row without a failure. 0 never unflags."""
+        times in a row without a failure. 0 never unflags. ``sha``: this run's commit,
+        kept when its reach is the first to hold the test."""
         e = self.tests.setdefault(id, Entry())
-        e.landed = e.landed or reached
+        if reached and not e.landed:
+            e.landed, e.landed_sha = True, sha or None
         if failed:
             e.clean = 0
         elif e.landed:
