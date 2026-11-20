@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from fastci.adapter import Project
 from fastci.python.adapter import PythonAdapter
 
 FIX = Path(__file__).parent / "fixtures"
@@ -58,3 +59,17 @@ def test_env_drops_an_outer_runs_variables(monkeypatch):
     env = PythonAdapter().env({"FASTCI_SELECT": "inner"})
     assert env["FASTCI_SELECT"] == "inner"
     assert not {"FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX"} & set(env)
+
+
+def test_without_uv_python3_stands_in_for_a_missing_python(tmp_path, monkeypatch):
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    for name in ("python3", "python"):
+        (bin_ / name).write_text("#!/bin/sh\n")
+    (bin_ / "python3").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_))
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    project = Project("python", ".", frozenset({"pytest"}), ())
+    assert PythonAdapter().python(project) == ["python3"]
+    (bin_ / "python").chmod(0o755)
+    assert PythonAdapter().python(project) == ["python"]
