@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -82,7 +83,10 @@ class PythonAdapter:
     def python(self, project: Project) -> list[str]:
         if self._python:
             return list(self._python)
-        return ["uv", "run", "python"] if "uv" in project.tools else ["python"]
+        if "uv" in project.tools:
+            return ["uv", "run", "python"]
+        # Many systems have only python3; an active virtualenv puts python first on PATH.
+        return ["python"] if shutil.which("python") else ["python3"]
 
     def detect(self, repo: str) -> list[Project]:
         root = Path(repo)
