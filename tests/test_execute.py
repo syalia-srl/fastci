@@ -371,6 +371,7 @@ def test_a_failure_no_failed_test_explains_keeps_the_exit_code(capsys, first):
 # Flagging: fake issues functions record each call to GitHub.
 
 SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+RUN = "https://github.com/o/r/actions/runs/4519"
 
 
 class FakeIssues:
@@ -434,7 +435,11 @@ def test_a_flake_on_a_pull_request_opens_an_issue_and_comments(monkeypatch, tmp_
     [(op, label, id, body), comment] = gh.writes()
     assert (op, label, id) == ("open_issue", "flaky", "t::a")
     assert issues.marker("t::a") in body.splitlines()
-    assert comment == ("comment", 41, "Failed and then passed on #7 at a1b2c3d (run 4519).")
+    assert comment == (
+        "comment",
+        41,
+        "Failed and then passed on #7 at a1b2c3d ([run 4519](https://github.com/o/r/actions/runs/4519)).",
+    )
     assert a.envs[0]["FASTCI_FLAKY_MARK"] == "quarantine"
     err = capsys.readouterr().err
     # The flag line closes the verdict's own block, as in the spec's "What a run prints".
@@ -456,7 +461,22 @@ def test_a_pull_request_comment_cites_the_head_commit(monkeypatch, tmp_path):
     event.write_text(json.dumps({"pull_request": {"head": {"sha": "f00ba12" + "0" * 33}}}))
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
     run_flagged(flagger(tmp_path))
-    assert gh.writes() == [("comment", 18, "Failed and then passed on #7 at f00ba12 (run 4519).")]
+    assert gh.writes() == [
+        (
+            "comment",
+            18,
+            "Failed and then passed on #7 at f00ba12 ([run 4519](https://github.com/o/r/actions/runs/4519)).",
+        )
+    ]
+
+
+def test_the_comment_links_the_run_on_the_server_it_ran_on(monkeypatch, tmp_path):
+    gh = FakeIssues(monkeypatch, {"t::a": issues.Issue(18, True)})
+    in_ci(monkeypatch, "refs/pull/7/merge")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://git.example.org")
+    run_flagged(flagger(tmp_path))
+    link = "[run 4519](https://git.example.org/o/r/actions/runs/4519)"
+    assert gh.writes() == [("comment", 18, f"Failed and then passed on #7 at a1b2c3d ({link}).")]
 
 
 @pytest.mark.parametrize(
@@ -477,7 +497,7 @@ def test_off_the_default_push_a_flake_opens_its_issue_and_comments(
     code, _ = run_flagged(flagger(tmp_path, tier="release"))
     assert code == 0
     assert [c[0] for c in gh.writes()] == ["open_issue", "comment"]
-    text = f"Failed and then passed on {where} at a1b2c3d (run 4519)."
+    text = f"Failed and then passed on {where} at a1b2c3d ([run 4519]({RUN}))."
     assert gh.writes()[1] == ("comment", 41, text)
     assert "flagged as flaky: #41 (new)" in capsys.readouterr().err
     assert not (tmp_path / HISTORY).exists()
@@ -497,7 +517,13 @@ def test_a_second_flake_of_a_flagged_test_only_comments(monkeypatch, tmp_path):
     in_ci(monkeypatch, "refs/pull/7/merge")
     code, a = run_flagged(flagger(tmp_path))
     assert code == 0
-    assert gh.writes() == [("comment", 18, "Failed and then passed on #7 at a1b2c3d (run 4519).")]
+    assert gh.writes() == [
+        (
+            "comment",
+            18,
+            "Failed and then passed on #7 at a1b2c3d ([run 4519](https://github.com/o/r/actions/runs/4519)).",
+        )
+    ]
     with open(a.envs[0]["FASTCI_FLAGGED"]) as f:
         assert json.load(f) == {"t::a": 18}
 

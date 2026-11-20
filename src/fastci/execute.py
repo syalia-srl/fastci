@@ -429,9 +429,9 @@ class Flagger:
             if self.history is not None:
                 entry.issue = number
             if self.where:
-                when = (
-                    f"Failed and then passed on {self.where} at {self.head[:7]} (run {self.run})."
-                )
+                server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+                link = f"[run {self.run}]({server}/{repo}/actions/runs/{self.run})"
+                when = f"Failed and then passed on {self.where} at {self.head[:7]} ({link})."
                 issues.comment(repo, token, number, when)
         except Exception as e:
             line = f"could not write the flag for {id}: {e}"
