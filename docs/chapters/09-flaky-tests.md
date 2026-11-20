@@ -111,7 +111,7 @@ A forgiven test is flagged, so someone fixes it. A flagged test still runs and i
 
 `store` says where the flags live:
 
-- `"issues"`, the default: one GitHub issue per test, labelled `flaky`. Its body carries the node id in a line `<!-- fastci:test=NODEID -->`, which is how fastci finds it again; the title is only for people. A flake on a pull request opens the issue, or reopens a closed one, and adds a comment naming the pull request, the commit and the run. On main, fastci rewrites the body with the test's failure rate and its first and last failure.
+- `"issues"`, the default: one GitHub issue per test, labelled `flaky`. Its body carries the node id in a line `<!-- fastci:test=NODEID -->`, which is how fastci finds it again; the title is only for people. A flake on a pull request, a release branch or a tag opens the issue, or reopens a closed one, and adds a comment naming the pull request (or the branch or tag), the commit and the run. On a push to the default branch, fastci rewrites the body with the test's failure rate and its first and last failure.
 - `"marks"`: a test carrying `@pytest.mark.quarantine("#N")` (the mark is the `mark` setting) is flagged. fastci never edits your code; when a test flakes it prints the line to add:
 
   ```text
@@ -122,7 +122,7 @@ A forgiven test is flagged, so someone fixes it. A flagged test still runs and i
 
 Marks are read in every mode, so a repository that already quarantines tests by hand keeps working.
 
-Main measures. Each run on the default branch adds every flagged test's outcome and every forgiven test to `.fastci/flaky.json` (the last 50 outcomes per test) and uploads it as the `fastci-flaky` artifact for 90 days; the next run on main starts from the newest one.
+Main measures. Each push to the default branch adds every flagged test's outcome and every forgiven test to `.fastci/flaky.json` (the last 50 outcomes per test) and uploads it as the `fastci-flaky` artifact for 90 days; the next run on main starts from the newest one.
 
 A laptop reads the flags and never writes them. It fetches the open flaky issues with the token it uses for the map, gives up after 5 seconds, and keeps a copy in `.fastci/flagged.json` for when it is offline. A test forgiven there prints `failed and then passed; CI will flag it if it does the same there`.
 
