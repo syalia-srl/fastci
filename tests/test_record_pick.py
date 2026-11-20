@@ -127,3 +127,35 @@ def test_fastci_runs_the_picked_tests_in_a_pull_request(mapped):
     )
     assert p.returncode == 0, p.stderr + p.stdout
     assert re.search(r"fastci: tests: \d+ picked", p.stderr), p.stderr
+
+
+def test_record_with_source_uses_the_projects_interpreter(sample, monkeypatch):
+    from fastci import cli
+    from fastci.python import adapter, record
+
+    seen = {}
+    monkeypatch.setattr(adapter.PythonAdapter, "python", lambda self, p: ["the-projects-python"])
+    monkeypatch.setattr(record, "record", lambda *a, **k: seen.update(k, sources=a[2]) or 0)
+    monkeypatch.chdir(sample)
+    assert cli.main(["map", "record", "--source", "src"]) == 0
+    assert seen["sources"] == ["src"] and seen["python"][-1] == "the-projects-python"
+
+
+def test_an_empty_map_counts_as_no_map(sample, monkeypatch, capsys):
+    from fastci import cli
+    from fastci.python.mapfile import TestMap
+
+    monkeypatch.chdir(sample)
+    TestMap(sha="x", tests=[], durations=[], always=set(), files={}, reads={}).save("empty.json.gz")
+    assert cli.main(["map", "pick", "--base", "HEAD", "--map", "empty.json.gz"]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "ALL" and "has no tests" in out.err
+
+
+def test_version(capsys):
+    import fastci
+    from fastci import cli
+
+    with __import__("pytest").raises(SystemExit):
+        cli.main(["--version"])
+    assert capsys.readouterr().out.strip() == f"fastci {fastci.__version__}"
