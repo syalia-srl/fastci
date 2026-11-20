@@ -15,7 +15,7 @@ fastci plan           # print what it would run, and why
 fastci guide          # how to move a repository's CI to fastci
 ```
 
-**The book** is at <https://syalia-srl.github.io/fastci/>: a Quick Start, a
+**The book** is at <https://syalia.com/fastci/>: a Quick Start, a
 User Guide (moving a repository, tiers, why a test ran, stages, the laptop) and
 a Developer Guide. Every command in it runs when the book is built.
 
