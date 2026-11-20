@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -53,6 +54,25 @@ def newest_artifact(
         if not a["expired"] and (a.get("workflow_run") or {}).get("head_branch") == branch
     ]
     return max(arts, key=lambda a: a["created_at"]) if arts else None
+
+
+def green_shas(
+    repo: str,
+    branch: str,
+    workflow: str,
+    token: str,
+    exclude_run: str | None,
+    timeout: float = 60,
+) -> list[str]:
+    """The commits of the successful push runs of ``workflow`` (its file name) on
+    ``branch``, newest first, leaving out the run ``exclude_run`` (the one asking)."""
+    url = (
+        f"{API}/repos/{repo}/actions/workflows/{urllib.parse.quote(workflow)}/runs"
+        f"?branch={urllib.parse.quote(branch)}&event=push&status=success&per_page=50"
+    )
+    with _get(url, token, timeout=timeout) as r:
+        runs = json.load(r)["workflow_runs"]
+    return [run["head_sha"] for run in runs if str(run["id"]) != exclude_run]
 
 
 def _download(url: str, token: str, out: str) -> None:

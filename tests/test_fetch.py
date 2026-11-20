@@ -63,3 +63,37 @@ def test_fetch_falls_back_to_testmap_artifact(monkeypatch, tmp_path):
     monkeypatch.setenv("GH_TOKEN", "t")
     assert fetch.fetch("o/r", str(tmp_path / "m.gz")) == "abc"
     assert calls == ["fastci", "testmap"]
+
+
+def _runs(monkeypatch, runs, seen=None):
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def get(url, token, follow=True, timeout=60):
+        if seen is not None:
+            seen.append(url)
+        return R(json.dumps({"workflow_runs": runs}).encode())
+
+    monkeypatch.setattr(fetch, "_get", get)
+
+
+def test_green_shas_asks_for_this_workflows_runs_and_skips_this_run(monkeypatch):
+    runs = [
+        {"id": 9, "head_sha": "this"},
+        {"id": 7, "head_sha": "green"},
+        {"id": 6, "head_sha": "older"},
+    ]
+    seen = []
+    _runs(monkeypatch, runs, seen)
+    assert fetch.green_shas("o/r", "main", "fastci.yml", "t", "9") == ["green", "older"]
+    assert seen[0].startswith(f"{fetch.API}/repos/o/r/actions/workflows/fastci.yml/runs?")
+    assert "branch=main" in seen[0] and "status=success" in seen[0] and "event=push" in seen[0]
+
+
+def test_green_shas_empty_without_runs(monkeypatch):
+    _runs(monkeypatch, [])
+    assert fetch.green_shas("o/r", "main", "fastci.yml", "t", None) == []

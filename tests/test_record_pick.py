@@ -159,3 +159,15 @@ def test_version(capsys):
     with __import__("pytest").raises(SystemExit):
         cli.main(["--version"])
     assert capsys.readouterr().out.strip() == f"fastci {fastci.__version__}"
+
+
+def test_a_picked_test_carries_the_share_of_the_suite_behind_it(mapped):
+    from fastci.config import TestsConfig
+    from fastci.python.mapfile import TestMap
+    from fastci.python.pick import Picker
+
+    edit(mapped, "src/sample/calc.py", "return math.sqrt(x)", "return math.sqrt(x) + 0")
+    tm = TestMap.load(str(mapped / ".fastci" / "map.json.gz"))
+    p = Picker(tm, str(mapped), TestsConfig()).pick("HEAD~1", "HEAD")
+    assert p.reach == {"tests/test_calc.py::test_root": 1 / len(tm.tests)}
+    assert "tests/test_coherence.py::test_always_runs" in p.tests

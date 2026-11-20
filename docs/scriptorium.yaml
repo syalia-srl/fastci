@@ -18,6 +18,7 @@ files:
   - chapters/06-on-a-laptop.md
   - chapters/07-architecture.md
   - chapters/08-another-language.md
+  - chapters/09-flaky-tests.md
 
 outputs:
   site:

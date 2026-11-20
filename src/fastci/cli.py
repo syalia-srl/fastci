@@ -69,7 +69,7 @@ def _context(args):
 def _plan(args) -> int:
     from .plan import render
 
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, _ = _prepare(args)
     print(render(ctx, steps))
     if caps["line"]:
         print(caps["line"])
@@ -80,15 +80,29 @@ def _prepare(args):
     import dataclasses
 
     from .execute import ensure_map, repo_of
+    from .flaky import Reach, reach_of
     from .plan import build, gather
+    from .python.pick import is_test_file
 
     root, cfg, ctx, gpu = _context(args)
+    # Main and release run every test, and judge a flake by what changed since their last green run.
+    since_green = ctx.ci and ctx.spec.tests == "all" and cfg.retries_for(ctx.tier) > 0
     map_path = os.path.join(root, args.map)
     if args.map == DEFAULT_MAP:
-        map_path = ensure_map(root, ctx, repo_of(root), cfg.default_branch) or map_path
+        branch = cfg.default_branch
+        map_path = ensure_map(root, ctx, repo_of(root), branch, since_green) or map_path
     projects, changed, picks, maps = gather(root, ctx, cfg, map_path)
     steps = build(ctx, cfg, root, projects, changed, picks, maps, gpu)
     caps = _caps(cfg, ctx, projects, maps)
+    reach = Reach.everything()
+    py = next((p for p in projects if p.adapter == "python"), None)
+    if py and ctx.spec.tests != "all":
+        tests = {f for f in changed or () if is_test_file(f)}
+        tm = maps.get(py.root)
+        known = frozenset(tm.tests) if tm else None
+        reach = reach_of(picks.get(py.root), tests, cfg.flaky.reach_share, known)
+    elif py and since_green:
+        reach = _since_green(root, cfg, ctx, maps.get(py.root))
     if caps["workers"]:
         n = ["-n", str(caps["workers"])]
         steps = [
@@ -97,7 +111,61 @@ def _prepare(args):
             else s
             for s in steps
         ]
-    return root, cfg, ctx, projects, steps, caps
+    return root, cfg, ctx, projects, steps, caps, reach
+
+
+def _since_green(root, cfg, ctx, tm):
+    """What the commits since this workflow's last green run on this branch reach; every
+    test when that run or its commit cannot be found, with one line saying why."""
+    import dataclasses
+
+    from . import fetch
+    from .execute import _token, repo_of, say
+    from .flaky import UNJUDGEABLE_SINCE, Reach, reach_of
+    from .python.pick import Picker, git, is_test_file
+
+    repo, token = repo_of(root), _token(ctx)
+    branch = os.environ.get("GITHUB_REF_NAME") or cfg.default_branch
+    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    workflow = os.path.basename(ref.split("@")[0])
+    sha = why = None
+    if tm is None:
+        why = "no map to tell what changed since the last green run"
+    elif not repo or not token:
+        why = "no GitHub repository or token to find the last green run"
+    elif not ref:
+        why = "no GITHUB_WORKFLOW_REF to find the last green run"
+    else:
+        try:
+            shas = fetch.green_shas(repo, branch, workflow, token, os.environ.get("GITHUB_RUN_ID"))
+        except Exception as e:
+            why = f"could not find the last green run ({e})"
+        else:
+            # A re-run or a run that finished late can be green at a commit after HEAD:
+            # diffing against it would hide HEAD's own change.
+            sha = next((s for s in shas if _is_ancestor(root, s)), None)
+            if not shas:
+                why = f"no green run of {workflow} on {branch}"
+            elif sha is None:
+                why = f"no green run of {workflow} on {branch} before this commit in this clone"
+    if why:
+        say(f"{why}; every test counts as reached")
+        return Reach.everything(UNJUDGEABLE_SINCE)
+    say(f"judged against the last green run on {branch}, at {sha[:10]}")
+    tests = {
+        f for f in git(root, "diff", "--name-only", "--no-renames", sha).split() if is_test_file(f)
+    }
+    pick = Picker(tm, root, cfg.tests).pick(sha)
+    reach = reach_of(pick, tests, cfg.flaky.reach_share, frozenset(tm.tests))
+    return dataclasses.replace(reach, since=sha)
+
+
+def _is_ancestor(root: str, sha: str) -> bool:
+    """Whether ``sha`` is HEAD or a commit before it; False when git lacks it."""
+    out = subprocess.run(
+        ["git", "-C", root, "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True
+    )
+    return out.returncode == 0
 
 
 def _caps(cfg, ctx, projects, maps) -> dict:
@@ -136,8 +204,9 @@ def _caps(cfg, ctx, projects, maps) -> dict:
 def _run(args) -> int:
     from .adapter import adapters
     from .execute import execute, say
+    from .flaky import FlakyRun
 
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, reach = _prepare(args)
     say(ctx.reason)
     if caps["line"]:
         say(caps["line"])
@@ -152,6 +221,7 @@ def _run(args) -> int:
         fail_fast_tests=ctx.spec.fail_fast,
         wrap=caps["wrap"],
         cap_note=caps["note"],
+        flaky=FlakyRun(cfg.flaky, cfg.retries_for(ctx.tier), reach),
     )
 
 
@@ -163,7 +233,7 @@ def _fix(args) -> int:
 
     _, cfg, _, _ = _context(args)
     args.tier = next((n for n, t in cfg.tiers.items() if t.capped), args.tier)
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, _ = _prepare(args)
     by_root = {p.root: p for p in projects}
     for s in steps:
         if s.action != "run":

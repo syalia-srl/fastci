@@ -11,6 +11,10 @@ serves both commands:
   come from coverage itself (``--cov-context=test``).
 - ``FASTCI_SELECT=<file>`` (set by ``fastci map run``): keep only the collected
   tests whose node id, or whose file, is listed in that file.
+- ``FASTCI_DONE=<file>`` (set when fastci resumes a stage stopped early):
+  deselect the tests whose node id is listed in that file.
+- ``FASTCI_RESULTS=<file>``: append one JSON line per test event to that file,
+  and one for the session when it ends, read back by ``fastci.results``.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ import sys
 
 RECORD = os.environ.get("FASTCI_RECORD")
 SELECT = os.environ.get("FASTCI_SELECT")
+DONE = os.environ.get("FASTCI_DONE")
+RESULTS = os.environ.get("FASTCI_RESULTS")
 ROOT = os.path.realpath(os.environ.get("FASTCI_ROOT", os.getcwd()))
 
 _state: dict = {"test": None, "busy": False}
@@ -98,7 +104,13 @@ MARKS = {
 COLLECT = os.environ.get("FASTCI_COLLECT")
 
 
+_worker = {"is": False}
+
+
 def pytest_configure(config):
+    # An xdist worker's config has workerinput; the environment variable also reaches
+    # any pytest a worker starts, which is not a worker.
+    _worker["is"] = hasattr(config, "workerinput")
     for name, text in MARKS.items():
         config.addinivalue_line("markers", f"{name}: {text}")
 
@@ -112,24 +124,92 @@ if COLLECT:
                 f.write(json.dumps({"id": item.nodeid, "marks": marks}) + "\n")
 
 
-if SELECT:
+def _select(items) -> tuple[list, list]:
+    with open(SELECT) as f:
+        order = {}
+        for line in f:
+            if line.strip():
+                order.setdefault(line.strip(), len(order))
+    keep, drop = [], []
+    for item in items:
+        nodeid = item.nodeid
+        keys = (nodeid, nodeid.split("[")[0], nodeid.split("::")[0])
+        rank = min((order[k] for k in keys if k in order), default=None)
+        if rank is None:
+            drop.append(item)
+        else:
+            keep.append((rank, item))
+    keep.sort(key=lambda pair: pair[0])
+    return [item for _, item in keep], drop
+
+
+def _drop_done(items) -> tuple[list, list]:
+    with open(DONE, encoding="utf-8") as f:
+        done = {line.rstrip("\n") for line in f if line.strip()}
+    return [i for i in items if i.nodeid not in done], [i for i in items if i.nodeid in done]
+
+
+if SELECT or DONE:
 
     def pytest_collection_modifyitems(config, items):
-        with open(SELECT) as f:
-            order = {}
-            for line in f:
-                if line.strip():
-                    order.setdefault(line.strip(), len(order))
-        keep, drop = [], []
-        for item in items:
-            nodeid = item.nodeid
-            keys = (nodeid, nodeid.split("[")[0], nodeid.split("::")[0])
-            rank = min((order[k] for k in keys if k in order), default=None)
-            if rank is None:
-                drop.append(item)
-            else:
-                keep.append((rank, item))
-        keep.sort(key=lambda pair: pair[0])
+        keep, drop = list(items), []
+        if SELECT:
+            keep, drop = _select(keep)
+        if DONE:
+            keep, done = _drop_done(keep)
+            drop += done
         if drop:
             config.hook.pytest_deselected(items=drop)
-        items[:] = [item for _, item in keep]
+        items[:] = keep
+
+
+if RESULTS:
+    import pytest
+
+    def _write(event: dict) -> None:
+        # Under xdist the controller sees every worker's events, and the crashes.
+        if _worker["is"]:
+            return
+        # One write per line in append mode, so lines never interleave.
+        with open(RESULTS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def pytest_runtest_logstart(nodeid, location):
+        _write({"e": "started", "id": nodeid})
+
+    def pytest_runtest_logreport(report):
+        if report.outcome != "failed" and report.when != "call":
+            return
+        crash = getattr(report.longrepr, "reprcrash", None)
+        error = crash.message.splitlines()[0] if crash and crash.message else ""
+        _write(
+            {
+                "e": "outcome",
+                "id": report.nodeid,
+                "when": report.when,
+                "outcome": report.outcome,
+                "error": error,
+                "dur": report.duration,
+            }
+        )
+
+    def pytest_runtest_logfinish(nodeid, location):
+        _write({"e": "finished", "id": nodeid})
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_handlecrashitem(crashitem, report, sched):
+        _write({"e": "crashed", "id": crashitem})
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_sessionfinish(session, exitstatus):
+        # What pytest itself counted: a collection error, a coverage threshold or a
+        # plugin adds to testsfailed without a failed test; -x or --maxfail from
+        # addopts or PYTEST_ADDOPTS stop the session without fastci seeing the flag.
+        _write(
+            {
+                "e": "session",
+                "testsfailed": session.testsfailed,
+                "stopped": bool(session.shouldfail or session.shouldstop),
+                "status": int(exitstatus),
+            }
+        )

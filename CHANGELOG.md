@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- A failed test is retried once, serially, in a fresh pytest process on the same
+  machine. If it passes, the verdict depends on what the change reaches: a test
+  the change does not reach goes green; one it reaches stays red, as do a crash,
+  a second failure, and three or more tests passing on the retry (the machine).
+- Main and release branches judge against the commits since the last green run
+  of the same workflow on the same branch. Without a map, a token, a green run
+  or that run's commit, every test counts as reached and the run says why.
+- A forgiven failure never hides anything else: the stage stays red when
+  pytest counted a failure no test explains (a collection error, a coverage
+  threshold), and runs on when pytest stopped early, even from `-x` in
+  `addopts` or `PYTEST_ADDOPTS`. A test the map does not know counts as
+  reached. On main, a green run at a commit after the one under test is
+  skipped.
+- Only SIGABRT, SIGBUS, SIGSEGV, SIGKILL, SIGILL and SIGFPE blame the test
+  that was running; SIGTERM and SIGINT do not.
+- `[tool.fastci.flaky]`: `retries`, `machine-threshold`, `reach-share`,
+  `forgive-reached`; a tier table takes `retries`. A value of the wrong type or
+  out of range is a config error naming its key.
+- The book: a chapter on flaky tests.
+
 ## 0.2.1
 
 - `fastci map record --source` ran pytest with fastci's own interpreter, not
