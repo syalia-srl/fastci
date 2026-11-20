@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 
-from . import fetch
+from . import fetch, results
 from .adapter import Adapter, Project
+from .flaky import UNJUDGEABLE, FlakyRun, Verdict, judge, strip_xdist
 from .local import killed_by_cap
 from .plan import Step
 from .tier import Context
@@ -30,6 +35,7 @@ def execute(
     fail_fast_tests: bool,
     wrap: Callable[[list[str]], list[str]] = lambda a: a,
     cap_note: str | None = None,
+    flaky: FlakyRun | None = None,
 ) -> int:
     ran = skipped = 0
     for i, s in enumerate(steps):
@@ -42,7 +48,10 @@ def execute(
         if s.stage in TEST_STAGES:
             args = [*s.command, *(["--maxfail=1"] if fail_fast_tests else [])]
             adapter = adapters[project.adapter]
-            code = adapter.run_tests(project, root, s.select, args, {}, wrap)
+            if flaky is None or flaky.retries == 0:
+                code = adapter.run_tests(project, root, s.select, args, {}, wrap)
+            else:
+                code = _judged(adapter, project, root, s.select, args, wrap, flaky, cap_note)
             code = 0 if code == 5 else code
         else:
             cwd = os.path.join(root, project.root)
@@ -57,6 +66,102 @@ def execute(
         ran += 1
     say(f"{ran} stages passed, {skipped} skipped")
     return 0
+
+
+INDENT = "\n" + " " * 10
+
+
+def say_verdict(v: Verdict, store: str) -> None:
+    if v.kind == "crashed":
+        how = f" with {v.why}" if v.why else ""
+        lines = [f"killed its process{how}: a fault in the code or the machine, not a flake"]
+    elif v.kind == "failed":
+        lines = ["failed, then failed again on retry"]
+    elif v.kind == "machine":
+        lines = ["failed, then passed; red: this looks like the machine, not the code"]
+    elif v.kind == "reached":
+        if v.why == UNJUDGEABLE:
+            lines = [f"failed, then passed; {UNJUDGEABLE}, so it counts as reached"]
+        else:
+            lines = [f"failed, then passed; this change reaches it through {v.why}"]
+        lines.append("red: check for a race in what the change touched")
+    else:
+        lines = [
+            "failed, then passed; this change does not reach it",
+            "passed in a fresh process: it may depend on test order",
+        ]
+    say(INDENT.join([v.id, *lines]))
+
+
+def _signal_name(code: int) -> str:
+    if not results.signalled(code):
+        return ""
+    try:
+        return signal.Signals(-code if code < 0 else code - 128).name
+    except ValueError:
+        return ""
+
+
+def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_note) -> int:
+    """Run a test stage, retry what failed and judge it: the stage's exit code.
+
+    With --maxfail=1 a forgiven failure stopped the stage early, so it runs again
+    without the tests already passed or judged."""
+    rescued: set[str] = set()  # passed on retry, in any run of the stage
+    done: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix="fastci-") as tmp:
+        n = itertools.count()
+
+        def run(sel, a, env):
+            path = os.path.join(tmp, f"results-{next(n)}.jsonl")
+            code = adapter.run_tests(project, root, sel, a, {**env, "FASTCI_RESULTS": path}, wrap)
+            return code, path
+
+        while True:
+            env = {}
+            if done:
+                env["FASTCI_DONE"] = os.path.join(tmp, f"done-{next(n)}.txt")
+                with open(env["FASTCI_DONE"], "w", encoding="utf-8") as f:
+                    f.write("".join(f"{t}\n" for t in sorted(done)))
+            code, path = run(select, args, env)
+            if code in (0, 5) or (cap_note and killed_by_cap(code)):
+                return code
+            res = results.read(path, results.signalled(code))
+            if res is None:
+                return code
+            failed = [*res.failed, *sorted(res.crashed - set(res.failed))]
+            if not failed:
+                return code
+            retry = [t for t in failed if t not in res.crashed]
+            if retry:
+                times = "once" if flaky.retries == 1 else f"up to {flaky.retries} times"
+                them = "them" if len(retry) > 1 else "it"
+                say(f"{len(retry)} failed; retrying {them} {times}, serially, in a fresh process")
+            for _ in range(flaky.retries):
+                retry = [t for t in retry if t not in rescued]
+                if not retry:
+                    break
+                c, p = run(retry, strip_xdist(args), {})
+                again = results.read(p, results.signalled(c))
+                if again:
+                    rescued |= again.passed & set(retry)
+            verdicts = judge(failed, rescued, res.crashed, flaky.reach, flaky.cfg)
+            machine = [v for v in verdicts if v.kind == "machine"]
+            if machine:
+                say(
+                    f"{len(machine)} tests failed and then passed:"
+                    " this looks like the machine, not the code"
+                )
+            how = _signal_name(code)
+            for v in verdicts:
+                say_verdict(
+                    dataclasses.replace(v, why=how) if v.kind == "crashed" else v, flaky.cfg.store
+                )
+            if any(v.blocks for v in verdicts):
+                return code
+            if "--maxfail=1" not in args:
+                return 0
+            done |= res.passed | set(failed)
 
 
 def repo_from_url(url: str) -> str | None:

@@ -81,6 +81,16 @@ def judge(
     return verdicts
 
 
+@dataclass
+class FlakyRun:
+    """What a test stage needs to retry its failed tests and judge them."""
+
+    cfg: FlakyConfig
+    retries: int
+    reach: Reach
+    flagger: "Flagger | None" = None  # noqa: F821, UP037
+
+
 def strip_xdist(args: list[str]) -> list[str]:
     """``args`` without xdist's -n, --numprocesses and --dist and their values."""
     out = []

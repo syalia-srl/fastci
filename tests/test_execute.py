@@ -5,7 +5,8 @@ import urllib.error
 from fastci import execute as ex
 from fastci import fetch
 from fastci.adapter import Project
-from fastci.config import default_tiers
+from fastci.config import FlakyConfig, default_tiers
+from fastci.flaky import FlakyRun, Reach
 from fastci.plan import Step
 from fastci.python.mapfile import TestMap
 from fastci.tier import detect
@@ -14,14 +15,40 @@ PROJ = Project("fake", ".", frozenset({"pytest"}), ())
 
 
 class FakeAdapter:
+    """Returns ``code``, or each call the next ``(code, events)`` of ``script``,
+    writing the events to the results file the call was given."""
+
     name = "fake"
 
-    def __init__(self, code=0):
-        self.code, self.calls = code, []
+    def __init__(self, code=0, script=()):
+        self.code, self.calls, self.script, self.done = code, [], list(script), []
 
     def run_tests(self, project, repo, select, args, env, wrap=lambda a: a):
         self.calls.append((select, args, wrap(["pytest"])))
-        return self.code
+        if "FASTCI_DONE" in env:
+            with open(env["FASTCI_DONE"]) as f:
+                self.done.append(set(f.read().split()))
+        if not self.script:
+            return self.code
+        code, events = self.script.pop(0)
+        if events and "FASTCI_RESULTS" in env:
+            with open(env["FASTCI_RESULTS"], "w") as f:
+                f.writelines(json.dumps(e) + "\n" for e in events)
+        return code
+
+
+def events(passed=(), failed=(), hung=()):
+    """Results-file lines: tests that passed, failed, or started and never finished."""
+    out = []
+    for t in passed:
+        out += [{"e": "started", "id": t}, outcome(t, "passed"), {"e": "finished", "id": t}]
+    for t in failed:
+        out += [{"e": "started", "id": t}, outcome(t, "failed"), {"e": "finished", "id": t}]
+    return out + [{"e": "started", "id": t} for t in hung]
+
+
+def outcome(t, result):
+    return {"e": "outcome", "id": t, "when": "call", "outcome": result, "error": "boom", "dur": 0}
 
 
 def check(name, cmd):
@@ -149,3 +176,94 @@ def test_a_laptop_gives_up_on_github_quickly(monkeypatch, tmp_path):
     ex.ensure_map(str(tmp_path), detect({}, "main", default_tiers(), "local"), "o/r", "main")
     ex.ensure_map(str(tmp_path), PR, "o/r", "main")
     assert seen[0] == 5 and seen[-1] == 60
+
+
+NOTHING = Reach(frozenset())
+
+
+def flaky(retries=1, reach=NOTHING):
+    return FlakyRun(FlakyConfig(), retries, reach)
+
+
+def xdist_step():
+    return Step("tests", ".", "run", ["-q", "-n", "4"], ["tests/test_a.py"], "")
+
+
+def test_a_flake_the_change_does_not_reach_passes(capsys):
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"]))])
+    assert run([xdist_step()], a, fail_fast_tests=False, flaky=flaky()) == 0
+    assert a.calls[1][0] == ["a"] and "-n" not in a.calls[1][1]
+    err = capsys.readouterr().err
+    assert "fastci: 1 failed; retrying it once, serially, in a fresh process" in err
+    assert "a\n          failed, then passed; this change does not reach it" in err
+
+
+def test_a_reached_flake_is_red(capsys):
+    reach = Reach(frozenset({"a"}), why={"a": "src/up.py:resume"})
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(reach=reach)) == 1
+    err = capsys.readouterr().err
+    assert "this change reaches it through src/up.py:resume" in err
+    assert "check for a race in what the change touched" in err
+
+
+def test_a_flake_nothing_can_judge_is_red(capsys):
+    a = FakeAdapter(script=[(1, events([], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(reach=Reach.everything())) == 1
+    assert "fastci cannot tell what this change reaches" in capsys.readouterr().err
+
+
+def test_a_failure_that_fails_again_is_red(capsys):
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (1, events([], ["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 1
+    assert "a\n          failed, then failed again on retry" in capsys.readouterr().err
+
+
+def test_every_retry_round_gets_a_try():
+    a = FakeAdapter(script=[(1, events([], ["a"])), (1, events([], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(retries=2)) == 0
+    assert len(a.calls) == 3
+
+
+def test_three_flakes_in_one_run_look_like_the_machine(capsys):
+    ids = ["a", "b", "c"]
+    a = FakeAdapter(script=[(1, events([], ids)), (0, events(ids))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 1
+    err = capsys.readouterr().err
+    assert "3 tests failed and then passed: this looks like the machine, not the code" in err
+
+
+def test_a_crashed_test_is_red_and_not_retried(capsys):
+    a = FakeAdapter(script=[(-7, events(["b"], hung=["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == -7
+    assert len(a.calls) == 1
+    assert "a\n          killed its process with SIGBUS" in capsys.readouterr().err
+
+
+def test_retries_zero_is_todays_behaviour(capsys):
+    a = FakeAdapter(script=[(1, events([], ["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(retries=0)) == 1
+    assert len(a.calls) == 1
+    assert "retrying" not in capsys.readouterr().err
+
+
+def test_no_results_file_means_the_exit_code():
+    a = FakeAdapter(script=[(2, None)])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 2
+    assert len(a.calls) == 1
+
+
+def test_a_cap_kill_blames_no_test(capsys):
+    note = "the run hit the memory cap of 4.0 GiB; raise [tool.fastci.local] memory"
+    a = FakeAdapter(script=[(-9, events(["b"], hung=["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, cap_note=note, flaky=flaky()) == -9
+    err = capsys.readouterr().err
+    assert note in err and "killed its process" not in err
+    assert len(a.calls) == 1
+
+
+def test_fail_fast_resumes_after_a_forgiven_flake():
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"])), (0, events(["c"]))])
+    assert run([tests_step()], a, fail_fast_tests=True, flaky=flaky()) == 0
+    assert len(a.calls) == 3 and a.done == [{"a", "b"}]
+    assert a.calls[2][0] == ["tests/test_a.py"] and "--maxfail=1" in a.calls[2][1]

@@ -69,7 +69,7 @@ def _context(args):
 def _plan(args) -> int:
     from .plan import render
 
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, _ = _prepare(args)
     print(render(ctx, steps))
     if caps["line"]:
         print(caps["line"])
@@ -80,7 +80,9 @@ def _prepare(args):
     import dataclasses
 
     from .execute import ensure_map, repo_of
+    from .flaky import Reach, reach_of
     from .plan import build, gather
+    from .python.pick import is_test_file
 
     root, cfg, ctx, gpu = _context(args)
     map_path = os.path.join(root, args.map)
@@ -89,6 +91,12 @@ def _prepare(args):
     projects, changed, picks, maps = gather(root, ctx, cfg, map_path)
     steps = build(ctx, cfg, root, projects, changed, picks, maps, gpu)
     caps = _caps(cfg, ctx, projects, maps)
+    # Main and release judge everything as reached until they diff against their last green run.
+    reach = Reach.everything()
+    py = next((p for p in projects if p.adapter == "python"), None)
+    if py and ctx.spec.tests != "all":
+        tests = {f for f in changed or () if is_test_file(f)}
+        reach = reach_of(picks.get(py.root), tests, cfg.flaky.reach_share)
     if caps["workers"]:
         n = ["-n", str(caps["workers"])]
         steps = [
@@ -97,7 +105,7 @@ def _prepare(args):
             else s
             for s in steps
         ]
-    return root, cfg, ctx, projects, steps, caps
+    return root, cfg, ctx, projects, steps, caps, reach
 
 
 def _caps(cfg, ctx, projects, maps) -> dict:
@@ -136,8 +144,9 @@ def _caps(cfg, ctx, projects, maps) -> dict:
 def _run(args) -> int:
     from .adapter import adapters
     from .execute import execute, say
+    from .flaky import FlakyRun
 
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, reach = _prepare(args)
     say(ctx.reason)
     if caps["line"]:
         say(caps["line"])
@@ -152,6 +161,7 @@ def _run(args) -> int:
         fail_fast_tests=ctx.spec.fail_fast,
         wrap=caps["wrap"],
         cap_note=caps["note"],
+        flaky=FlakyRun(cfg.flaky, cfg.retries_for(ctx.tier), reach),
     )
 
 
@@ -163,7 +173,7 @@ def _fix(args) -> int:
 
     _, cfg, _, _ = _context(args)
     args.tier = next((n for n, t in cfg.tiers.items() if t.capped), args.tier)
-    root, cfg, ctx, projects, steps, caps = _prepare(args)
+    root, cfg, ctx, projects, steps, caps, _ = _prepare(args)
     by_root = {p.root: p for p in projects}
     for s in steps:
         if s.action != "run":

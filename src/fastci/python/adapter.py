@@ -14,7 +14,14 @@ from pathlib import Path
 from ..adapter import Check, Project
 
 PY = ("**/*.py", "*.py", "pyproject.toml")
-OWN_VARS = ("FASTCI_SELECT", "FASTCI_RECORD", "FASTCI_COLLECT", "FASTCI_CTX", "FASTCI_RESULTS")
+OWN_VARS = (
+    "FASTCI_SELECT",
+    "FASTCI_RECORD",
+    "FASTCI_COLLECT",
+    "FASTCI_CTX",
+    "FASTCI_RESULTS",
+    "FASTCI_DONE",
+)
 # The directory holding the fastci package, so a project's own Python can import
 # the plugin without fastci being installed in that project's environment.
 FASTCI_PATH = str(Path(__file__).resolve().parents[2])
