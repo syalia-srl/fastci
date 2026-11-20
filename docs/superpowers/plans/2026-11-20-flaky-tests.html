@@ -149,7 +149,7 @@ code,pre{overflow-wrap:anywhere;font-variant-ligatures:none}
 <h2>Review focus</h2>
 <p class="note">Failure modes the spec implies that no feature test reaches. Each one's pinning test is in the task named after it.</p>
 <ul class="focus">
-<li><b>Node ids with parameters</b> (<code>test_x[sigere-api]</code>, <code>test_y[a b/c]</code>, unicode) must round-trip through the results file, the flagged file, the issue marker and the history unchanged.<span class="at">task 2, task 9</span></li>
+<li><b>Node ids with parameters</b> (<code>test_x[svc-api]</code>, <code>test_y[a b/c]</code>, unicode) must round-trip through the results file, the flagged file, the issue marker and the history unchanged.<span class="at">task 2, task 9</span></li>
 <li><b>A laptop run killed by fastci's own memory cap</b> (SIGKILL from the systemd scope) is the cap, not a crashed test: the cap note prints and no test is blamed.<span class="at">task 5</span></li>
 <li><b>No results file</b> (pytest died at collection, exit 2 or 4, or the plugin did not load): no retry, the exit code decides, as today.<span class="at">task 5</span></li>
 <li><b>A setup or teardown error</b> (a fixture that times out) is a failure of that test and is retried like a call failure.<span class="at">task 2</span></li>
@@ -248,7 +248,7 @@ def broken():
 def test_ok(): pass
 def test_bad(): assert 1 == 2
 def test_setup(broken): pass
-@pytest.mark.parametrize("x", ["sigere-api", "a b/c", "ñ"])
+@pytest.mark.parametrize("x", ["svc-api", "a b/c", "ñ"])
 def test_p(x): pass
 ''')
     pytester.runpytest("-p", "fastci.python.plugin")
