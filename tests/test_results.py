@@ -266,6 +266,7 @@ def test_ok(): pass
 def test_the_mark_flags_a_test_with_its_issue(pytester, tmp_path, monkeypatch):
     out = tmp_path / "r.jsonl"
     monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.setenv("FASTCI_FLAKY_MARK", "quarantine")
     pytester.makeini("[pytest]\nmarkers =\n    hold: a project's own mark\n")
     pytester.makepyfile(test_m=MARKED)
     p = pytester.runpytest_subprocess(
@@ -280,6 +281,38 @@ def test_the_mark_flags_a_test_with_its_issue(pytester, tmp_path, monkeypatch):
         "test_m.py::test_int": 12,
         "test_m.py::test_bare": None,
     }
+
+
+def test_a_plain_pytest_run_flags_nothing(pytester, tmp_path, monkeypatch):
+    # A repository that runs its quarantined tests in a job of its own sees them fail:
+    # only fastci, which sets FASTCI_FLAKY_MARK or FASTCI_FLAGGED, flags tests.
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.delenv("FASTCI_FLAKY_MARK", raising=False)
+    monkeypatch.delenv("FASTCI_FLAGGED", raising=False)
+    pytester.makeini("[pytest]\nmarkers =\n    hold: a project's own mark\n")
+    pytester.makepyfile(test_m=MARKED)
+    p = pytester.runpytest_subprocess(
+        "-p", "fastci.python.plugin", "-p", "no:xdist", "--strict-markers", "-k", "not other"
+    )
+    p.assert_outcomes(passed=1, failed=3)
+    r = results.read(str(out), signalled=False)
+    assert r.flagged == {} and len(r.failed) == 3
+
+
+@pytest.mark.parametrize("own", ["always", "slow", "gpu", "browser", "e2e", "bench"])
+def test_a_mark_naming_one_of_fastcis_own_flags_nothing(pytester, tmp_path, monkeypatch, own):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.setenv("FASTCI_FLAKY_MARK", own)
+    pytester.makepyfile(test_m=f"import pytest\n@pytest.mark.{own}\ndef test_x(): assert 0\n")
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist", "--markers")
+    p.stdout.fnmatch_lines([f"@pytest.mark.{own}: *fastci*"])
+    assert "a known flaky test" not in p.stdout.str()
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist")
+    p.assert_outcomes(failed=1)
+    r = results.read(str(out), signalled=False)
+    assert r.flagged == {} and r.failed == ["test_m.py::test_x"]
 
 
 def test_the_mark_name_is_configured(pytester, tmp_path, monkeypatch):

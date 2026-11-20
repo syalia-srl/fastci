@@ -20,6 +20,8 @@ serves both commands:
   tests as flaky: a flagged test's failure is reported as a non-strict expected
   failure, so it fails neither pytest's exit code nor ``--maxfail``, while the
   results file keeps the real outcome. ``FASTCI_SKIP_FLAGGED=1`` deselects them.
+  Only fastci sets one of the two variables; without either, a plain ``pytest``
+  run flags nothing. A mark name that is one of fastci's own flags nothing.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ SELECT = os.environ.get("FASTCI_SELECT")
 DONE = os.environ.get("FASTCI_DONE")
 RESULTS = os.environ.get("FASTCI_RESULTS")
 FLAGGED = os.environ.get("FASTCI_FLAGGED")
-FLAKY_MARK = os.environ.get("FASTCI_FLAKY_MARK") or "quarantine"
+FLAKY_MARK = os.environ.get("FASTCI_FLAKY_MARK")
 SKIP_FLAGGED = os.environ.get("FASTCI_SKIP_FLAGGED") == "1"
 ROOT = os.path.realpath(os.environ.get("FASTCI_ROOT", os.getcwd()))
 
@@ -110,8 +112,14 @@ MARKS = {
     "browser": "drives a browser; fastci runs it only on a release branch",
     "e2e": "drives the whole product; fastci runs it only on a release branch",
     "bench": "measures speed; fastci runs it only on a release branch",
-    FLAKY_MARK: 'a known flaky test, ("#N") its issue; its failure never fails the run',
 }
+# Flagging is on only when fastci runs pytest, which sets one of the two variables.
+FLAGGING = bool(FLAGGED or FLAKY_MARK)
+FLAKY_MARK = FLAKY_MARK or "quarantine"
+if FLAKY_MARK in MARKS:
+    FLAKY_MARK = None
+else:
+    MARKS[FLAKY_MARK] = 'a known flaky test, ("#N") its issue; its failure never fails the run'
 COLLECT = os.environ.get("FASTCI_COLLECT")
 
 
@@ -176,8 +184,10 @@ def _issue(value) -> int | None:
 
 def flag(item) -> tuple[bool, int | None]:
     """Whether the test is flagged as flaky, and its issue number when known."""
+    if not FLAGGING:
+        return False, None
     number = _listed.get(item.nodeid)
-    mark = item.get_closest_marker(FLAKY_MARK)
+    mark = item.get_closest_marker(FLAKY_MARK) if FLAKY_MARK else None
     if number is None and mark is not None and mark.args:
         number = _issue(mark.args[0])
     return item.nodeid in _listed or mark is not None, number
