@@ -218,11 +218,14 @@ def _sha(path: str) -> str | None:
         return None
 
 
-def ensure_map(root: str, ctx: Context, repo: str | None, branch: str) -> str | None:
-    """The path of a usable map, fetching main's newest when it is newer than ours."""
+def ensure_map(
+    root: str, ctx: Context, repo: str | None, branch: str, need: bool = False
+) -> str | None:
+    """The path of a usable map, fetching main's newest when it is newer than ours.
+    A tier that runs every test fetches only when it ``need``s the map anyway."""
     path = os.path.join(root, MAP)
     have = path if os.path.exists(path) else None
-    if ctx.spec.tests == "all" or repo is None:
+    if (ctx.spec.tests == "all" and not need) or repo is None:
         return have
     token = _token(ctx)
     if not token:

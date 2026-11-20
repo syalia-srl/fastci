@@ -85,18 +85,22 @@ def _prepare(args):
     from .python.pick import is_test_file
 
     root, cfg, ctx, gpu = _context(args)
+    # Main and release run every test, and judge a flake by what changed since their last green run.
+    since_green = ctx.ci and ctx.spec.tests == "all" and cfg.retries_for(ctx.tier) > 0
     map_path = os.path.join(root, args.map)
     if args.map == DEFAULT_MAP:
-        map_path = ensure_map(root, ctx, repo_of(root), cfg.default_branch) or map_path
+        branch = cfg.default_branch
+        map_path = ensure_map(root, ctx, repo_of(root), branch, since_green) or map_path
     projects, changed, picks, maps = gather(root, ctx, cfg, map_path)
     steps = build(ctx, cfg, root, projects, changed, picks, maps, gpu)
     caps = _caps(cfg, ctx, projects, maps)
-    # Main and release judge everything as reached until they diff against their last green run.
     reach = Reach.everything()
     py = next((p for p in projects if p.adapter == "python"), None)
     if py and ctx.spec.tests != "all":
         tests = {f for f in changed or () if is_test_file(f)}
         reach = reach_of(picks.get(py.root), tests, cfg.flaky.reach_share)
+    elif py and since_green:
+        reach = _since_green(root, cfg, ctx, maps.get(py.root))
     if caps["workers"]:
         n = ["-n", str(caps["workers"])]
         steps = [
@@ -106,6 +110,47 @@ def _prepare(args):
             for s in steps
         ]
     return root, cfg, ctx, projects, steps, caps, reach
+
+
+def _since_green(root, cfg, ctx, tm):
+    """What the commits since this workflow's last green run on this branch reach; every
+    test when that run or its commit cannot be found, with one line saying why."""
+    from . import fetch
+    from .execute import _token, repo_of, say
+    from .flaky import Reach, reach_of
+    from .python.pick import Picker, git, is_test_file
+
+    repo, token = repo_of(root), _token(ctx)
+    branch = os.environ.get("GITHUB_REF_NAME") or cfg.default_branch
+    ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    workflow = ref.removeprefix(f"{repo}/").split("@")[0]
+    sha = why = None
+    if tm is None:
+        why = "no map to tell what changed since the last green run"
+    elif not repo or not token:
+        why = "no GitHub repository or token to find the last green run"
+    elif not ref:
+        why = "no GITHUB_WORKFLOW_REF to find the last green run"
+    else:
+        try:
+            sha = fetch.last_green_sha(
+                repo, branch, workflow, token, os.environ.get("GITHUB_RUN_ID")
+            )
+        except Exception as e:
+            why = f"could not find the last green run ({e})"
+        else:
+            if sha is None:
+                why = f"no green run of {workflow} on {branch}"
+            elif not git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").strip():
+                why = f"git does not have {sha[:10]}, the last green run on {branch}"
+    if why:
+        say(f"{why}; every test counts as reached")
+        return Reach.everything()
+    say(f"judged against the last green run on {branch}, at {sha[:10]}")
+    tests = {
+        f for f in git(root, "diff", "--name-only", "--no-renames", sha).split() if is_test_file(f)
+    }
+    return reach_of(Picker(tm, root, cfg.tests).pick(sha), tests, cfg.flaky.reach_share)
 
 
 def _caps(cfg, ctx, projects, maps) -> dict:
