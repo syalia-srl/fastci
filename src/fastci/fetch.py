@@ -42,6 +42,23 @@ def _get(url: str, token: str, follow: bool = True, timeout: float = 60):
         raise
 
 
+def _send(method: str, url: str, token: str, body: dict, timeout: float = 30) -> dict:
+    """A write to the API: ``body`` goes as JSON, the JSON answer comes back."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
 def newest_artifact(
     repo: str, name: str, branch: str, token: str, timeout: float = 60
 ) -> dict | None:
