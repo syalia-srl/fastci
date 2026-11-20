@@ -97,30 +97,23 @@ def _finish(flaky: FlakyRun | None) -> None:
         flaky.flagger.finish(flaky.reach)
 
 
-VERDICTS = {
-    "crashed": "killed its process",
-    "failed": "failed, then failed again on retry",
-    "machine": "failed, then passed; looks like the machine",
-    "reached": "failed, then passed; reached",
-    "flaky": "failed, then passed; forgiven",
-}
-
-
 def summary(
     verdicts: list[Verdict],
     flagged_outcomes: dict[str, bool],
     issues_by_id: dict[str, int],
     url: str,
+    since: str = "",
 ) -> str:
-    """The job summary's table: one row per judged test, then one per flagged test
-    that ran (``flagged_outcomes``: whether it failed). ``url`` + number links an issue."""
+    """The job summary's table: one row per judged test, with the first line of its
+    verdict as the run prints it, then one per flagged test that ran
+    (``flagged_outcomes``: whether it failed). ``url`` + number links an issue."""
 
     def row(id: str, verdict: str) -> str:
         n = issues_by_id.get(id)
         test = id.replace("|", "\\|")  # a | in a node id would end the cell
         return f"| `{test}` | {verdict} | {f'[#{n}]({url}{n}) ' if n else ''}|"
 
-    rows = [row(v.id, VERDICTS[v.kind]) for v in verdicts]
+    rows = [row(v.id, verdict_lines(v, since)[0]) for v in verdicts]
     for id, failed in sorted(flagged_outcomes.items()):
         rows.append(row(id, f"flagged, {'failed' if failed else 'passed'}"))
     return "\n".join(["| test | verdict | issue |", "|---|---|---|", *rows]) + "\n"
@@ -132,6 +125,11 @@ INDENT = "\n" + " " * 10
 def say_verdict(v: Verdict, store: str, since: str = "", notes: Sequence[str] = ()) -> None:
     """``since``: on main, the last green run's sha the judged diff starts at; ``notes``:
     the flag's lines, which close the verdict's block."""
+    say(INDENT.join([v.id, *verdict_lines(v, since), *notes]))
+
+
+def verdict_lines(v: Verdict, since: str = "") -> list[str]:
+    """The verdict's lines, in the spec's wording."""
     if v.kind == "crashed":
         how = f" with {v.why}" if v.why else ""
         lines = [f"killed its process{how}: a fault in the code or the machine, not a flake"]
@@ -157,7 +155,7 @@ def say_verdict(v: Verdict, store: str, since: str = "", notes: Sequence[str] = 
             f"failed, then passed; {nothing}",
             "passed in a fresh process: it may depend on test order",
         ]
-    say(INDENT.join([v.id, *lines, *notes]))
+    return lines
 
 
 def _signal_name(code: int) -> str:
@@ -429,7 +427,8 @@ class Flagger:
             return
         numbers = {**self.numbers, **{id: i.number for id, i in (self.issues or {}).items()}}
         server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
-        text = summary(self.judged, self.ran, numbers, f"{server}/{self.repo}/issues/")
+        url = f"{server}/{self.repo}/issues/"
+        text = summary(self.judged, self.ran, numbers, url, reach.since)
         notes = "".join(f"- {line}\n" for line in self.lines)
         try:
             with open(path, "a", encoding="utf-8") as f:
@@ -440,7 +439,8 @@ class Flagger:
     def _unflag(self, id: str, reached: bool) -> None:
         """Count this run toward ``id`` leaving the list; close its flag when due."""
         assert self.history is not None
-        if not self.history.unflag_due(id, reached, self.ran[id], self.cfg.unflag_after):
+        due = self.history.unflag_due(id, reached, self.ran[id], self.cfg.unflag_after, self.sha)
+        if not due:
             return
         entry = self.history.tests[id]
         if self.cfg.store in ("issues", "both"):
@@ -449,21 +449,28 @@ class Flagger:
                 return
             issue = self.issues.get(id)
             if issue is not None and issue.open:
+                at = f" ({entry.landed_sha[:7]})" if entry.landed_sha else ""
                 text = (
                     f"Passed {entry.clean} runs on main in a row since a change that reaches"
-                    f" it landed ({self.sha[:7]}). Unflagged."
+                    f" it landed{at}. Unflagged."
                 )
-                try:
-                    issues.comment(self.repo, self.token, issue.number, text)
+                try:  # closed first: a refused close posts nothing, and the next run retries
                     issues.set_open(self.repo, self.token, issue.number, False)
                 except Exception as e:
                     self._say(f"could not unflag {id}: {e}")
                     return
                 self.issues[id] = issues.Issue(issue.number, False)
+                try:
+                    issues.comment(self.repo, self.token, issue.number, text)
+                except Exception as e:
+                    self._say(f"could not comment on #{issue.number}: {e}")
                 self._say(f"{id}: unflagged, #{issue.number} closed")
+            else:
+                why = f"#{issue.number} is already closed" if issue else "it has no issue"
+                self._say(f"{id}: unflagged after {entry.clean} clean runs on main; {why}")
         if self.cfg.store in ("marks", "both"):
             self._say(f"the mark on {id} can go")
-        entry.landed, entry.clean = False, 0
+        entry.landed, entry.clean, entry.landed_sha = False, 0, None
 
     def _record(self, flaky: list[str], res: results.Results) -> set[str]:
         """Add the flagged tests' outcomes and the flakes to the history: the

@@ -784,10 +784,13 @@ def test_a_resumed_stage_does_not_rerun_a_flagged_test(monkeypatch, tmp_path):
 
 # Leaving the list, and the job summary.
 
+OPEN_5 = issues.Issue(5, True)
+LANDED = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 
-def run_on_main(monkeypatch, tmp_path, entry, result="passed", reach=NOTHING, **cfg):
+
+def run_on_main(monkeypatch, tmp_path, entry, result="passed", reach=NOTHING, issue=OPEN_5, **cfg):
     """One run on main where flagged t::f (#5) has ``result``, with ``entry`` its history."""
-    gh = FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
+    gh = FakeIssues(monkeypatch, {"t::f": issue} if issue else {})
     in_ci(monkeypatch, "refs/heads/main")
     history_artifact(monkeypatch, {"version": 1, "tests": {"t::f": entry}})
     f = flagger(tmp_path, tier="main", **cfg)
@@ -800,23 +803,46 @@ REACHES_F = Reach(frozenset({"t::f"}))
 
 
 def test_on_main_the_20th_clean_run_after_a_reaching_change_closes_the_issue(monkeypatch, tmp_path):
-    entry = {"main": [0] * 19, "landed": True, "clean": 19}
+    entry = {"main": [0] * 19, "landed": True, "clean": 19, "landed_sha": LANDED}
     code, gh, _, e = run_on_main(monkeypatch, tmp_path, entry)
     assert code == 0
-    *_, said, closed = gh.writes()
+    *_, closed, said = gh.writes()
+    assert closed == ("set_open", 5, False)
     assert said == (
         "comment",
         5,
         "Passed 20 runs on main in a row since a change that reaches it landed"
-        f" ({SHA[:7]}). Unflagged.",
+        f" ({LANDED[:7]}). Unflagged.",
     )
-    assert closed == ("set_open", 5, False)
-    assert (e.landed, e.clean) == (False, 0)
+    assert (e.landed, e.clean, e.landed_sha) == (False, 0, None)
+
+
+def test_the_close_comment_leaves_out_a_landing_commit_it_does_not_know(monkeypatch, tmp_path):
+    entry = {"main": [0] * 19, "landed": True, "clean": 19}
+    _, gh, _, _ = run_on_main(monkeypatch, tmp_path, entry)
+    assert gh.writes()[-1] == (
+        "comment",
+        5,
+        "Passed 20 runs on main in a row since a change that reaches it landed. Unflagged.",
+    )
+
+
+@pytest.mark.parametrize(
+    "issue,why", [(None, "it has no issue"), (issues.Issue(5, False), "#5 is already closed")]
+)
+def test_a_due_test_without_an_open_issue_says_its_flag_ends(
+    monkeypatch, tmp_path, capsys, issue, why
+):
+    entry = {"main": [0] * 19, "landed": True, "clean": 19}
+    _, gh, f, e = run_on_main(monkeypatch, tmp_path, entry, issue=issue)
+    line = f"t::f: unflagged after 20 clean runs on main; {why}"
+    assert line in f.lines and f"fastci: {line}" in capsys.readouterr().err
+    assert ("set_open", 5, False) not in gh.writes() and (e.landed, e.clean) == (False, 0)
 
 
 def test_on_main_a_reaching_change_lands_and_counts(monkeypatch, tmp_path):
     _, gh, _, e = run_on_main(monkeypatch, tmp_path, {"main": [1]}, reach=REACHES_F)
-    assert (e.landed, e.clean) == (True, 1)
+    assert (e.landed, e.clean, e.landed_sha) == (True, 1, SHA)
     assert ("set_open", 5, False) not in gh.writes()
 
 
@@ -847,7 +873,25 @@ def test_with_marks_the_summary_says_the_mark_can_go(monkeypatch, tmp_path, caps
     assert gh.writes() == [] and (e.landed, e.clean) == (False, 0)
 
 
-def test_a_refused_close_keeps_the_streak(monkeypatch, tmp_path):
+def test_a_refused_close_keeps_the_streak_and_posts_nothing(monkeypatch, tmp_path):
+    entry = {"main": [0] * 19, "landed": True, "clean": 19}
+    gh = FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
+
+    def refuse(repo, token, number, is_open):
+        raise urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(issues, "set_open", refuse)
+    in_ci(monkeypatch, "refs/heads/main")
+    history_artifact(monkeypatch, {"version": 1, "tests": {"t::f": entry}})
+    f = flagger(tmp_path, tier="main")
+    a = FakeAdapter(script=[(0, [*events(["b"]), *flagged_outcome("t::f", "passed", 5)])])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=FlakyRun(f.cfg, 1, NOTHING, f)) == 0
+    assert any(line.startswith("could not unflag t::f: ") for line in f.lines)
+    assert not any(w[0] == "comment" for w in gh.writes())
+    assert History.load(tmp_path / HISTORY).tests["t::f"].clean == 20
+
+
+def test_a_refused_comment_after_the_close_still_unflags(monkeypatch, tmp_path):
     entry = {"main": [0] * 19, "landed": True, "clean": 19}
     gh = FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
 
@@ -860,21 +904,43 @@ def test_a_refused_close_keeps_the_streak(monkeypatch, tmp_path):
     f = flagger(tmp_path, tier="main")
     a = FakeAdapter(script=[(0, [*events(["b"]), *flagged_outcome("t::f", "passed", 5)])])
     assert run([tests_step()], a, fail_fast_tests=False, flaky=FlakyRun(f.cfg, 1, NOTHING, f)) == 0
-    assert any(line.startswith("could not unflag t::f: ") for line in f.lines)
-    assert ("set_open", 5, False) not in gh.writes()
-    assert History.load(tmp_path / HISTORY).tests["t::f"].clean == 20
+    assert ("set_open", 5, False) in gh.writes()
+    assert any(line.startswith("could not comment on #5: ") for line in f.lines)
+    assert "t::f: unflagged, #5 closed" in f.lines
+    assert History.load(tmp_path / HISTORY).tests["t::f"].clean == 0
 
 
 def test_the_summary_has_one_row_per_judged_test_with_its_issue_link():
-    verdicts = [Verdict("t::a", "flaky", False), Verdict("t::b|c", "failed", True)]
+    verdicts = [
+        Verdict("t::a", "flaky", False),
+        Verdict("t::b|c", "failed", True),
+        Verdict("t::d", "reached", True, "src/d.py"),
+        Verdict("t::e", "machine", True),
+        Verdict("t::g", "crashed", True),
+    ]
     text = ex.summary(verdicts, {"t::f": False}, {"t::a": 41, "t::f": 5}, "https://g/o/r/issues/")
     rows = [line for line in text.splitlines() if line.startswith("| `")]
     assert rows == [
-        "| `t::a` | failed, then passed; forgiven | [#41](https://g/o/r/issues/41) |",
+        "| `t::a` | failed, then passed; this change does not reach it"
+        " | [#41](https://g/o/r/issues/41) |",
         "| `t::b\\|c` | failed, then failed again on retry | |",
+        "| `t::d` | failed, then passed; this change reaches it through src/d.py | |",
+        "| `t::e` | failed, then passed; red: this looks like the machine, not the code | |",
+        "| `t::g` | killed its process: a fault in the code or the machine, not a flake | |",
         "| `t::f` | flagged, passed | [#5](https://g/o/r/issues/5) |",
     ]
     assert "| test | verdict | issue |" in text.splitlines()
+
+
+def test_on_main_the_summary_says_what_main_prints():
+    verdicts = [Verdict("t::a", "flaky", False), Verdict("t::d", "reached", True, "src/d.py")]
+    text = ex.summary(verdicts, {}, {}, "u/", since="0123456789")
+    forgiven = "failed, then passed; no commit since the last green run reaches it"
+    assert f"| `t::a` | {forgiven} | |" in text
+    assert (
+        "| `t::d` | failed, then passed; the commits since 0123456 reach it through src/d.py | |"
+        in text
+    )
 
 
 def test_every_run_in_ci_appends_the_table_and_the_flag_lines(monkeypatch, tmp_path):
@@ -889,8 +955,8 @@ def test_every_run_in_ci_appends_the_table_and_the_flag_lines(monkeypatch, tmp_p
     text = summary.read_text()
     assert text.startswith("before\n")
     assert (
-        "| `t::a` | failed, then passed; forgiven | [#41](https://github.com/o/r/issues/41) |"
-        in text
+        "| `t::a` | failed, then passed; this change does not reach it"
+        " | [#41](https://github.com/o/r/issues/41) |" in text
     )
     assert "| `t::f` | flagged, failed | [#5](https://github.com/o/r/issues/5) |" in text
     assert "- t::a: flagged as flaky: #41 (new)" in text
