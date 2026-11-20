@@ -20,8 +20,9 @@ jobs:
           python-version: "3.13"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0
       - run: uv sync --locked --group docs
+      - run: uv run --group docs scriptorium render docs/scriptorium.yaml --only print
       - run: make docs-check
-      - run: uv run --group docs scriptorium render docs/scriptorium.yaml --only print && cp docs/print.pdf docs/site/fastci.pdf
+      - run: cp docs/print.pdf docs/site/fastci.pdf
       - uses: actions/upload-pages-artifact@v3
         if: github.ref == 'refs/heads/main'
         with:
