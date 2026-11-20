@@ -1,0 +1,29 @@
+# The fastci book. Every Python block runs against the installed package when the
+# docs render (`make docs`): each chapter builds a small project in a temporary git
+# repository and runs fastci on it, so the output you read is fastci's own.
+theme: book
+execute: {timeout: 300, freeze: file}
+
+vars:
+  title: "fastci"
+  subtitle: "Run the checks and tests a change can break, cheapest first"
+
+files:
+  - chapters/00-index.md
+  - chapters/01-quick-start.md
+  - chapters/02-moving-a-repository.md
+  - chapters/03-tiers.md
+  - chapters/04-why-a-test-ran.md
+  - chapters/05-stages.md
+  - chapters/06-on-a-laptop.md
+  - chapters/07-architecture.md
+  - chapters/08-another-language.md
+
+outputs:
+  site:
+    format: docs
+    dir: site
+    repo-url: https://github.com/syalia-srl/fastci
+    version: auto
+  print:
+    format: pdf

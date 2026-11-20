@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
-      - run: uvx fastci@@@VERSION@@
+      - run: uvx --from git+https://github.com/syalia-srl/fastci@v@@VERSION@@ fastci
         env:
           GH_TOKEN: ${{ github.token }}
   # Records what every test runs, for picking in pull requests. Never gates.
@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx fastci@@@VERSION@@ map record --out "$RUNNER_TEMP/fastci/map.json.gz" -- @@ARGS@@ || echo "::warning title=fastci::suite failed under recording"
+      - run: uvx --from git+https://github.com/syalia-srl/fastci@v@@VERSION@@ fastci map record --out "$RUNNER_TEMP/fastci/map.json.gz" -- @@ARGS@@ || echo "::warning title=fastci::suite failed under recording"
       - uses: actions/upload-artifact@v4
         with:
           name: fastci

@@ -36,7 +36,7 @@ including the adapters, suites and end-to-end maps still to come, is
 - **record** joins both records into one map: per source file, per function
   and per line, the tests that ran it; per file read, the tests that read it;
   per test, its duration.
-- **pick** reads a git diff and the map and applies the rules in `README.md`.
+- **pick** reads a git diff and the map and applies the rules in the book (`docs/chapters/04-why-a-test-ran.md`).
 - **fetch** downloads the newest map that main's CI uploaded.
 
 ## Rules and their reasons
