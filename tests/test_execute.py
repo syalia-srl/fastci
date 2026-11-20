@@ -577,6 +577,38 @@ def test_on_main_a_green_run_still_records_the_flagged_tests(monkeypatch, tmp_pa
     assert History.load(tmp_path / HISTORY).tests["t::f"].main == [1]
 
 
+@pytest.mark.parametrize(
+    "outcomes,main",
+    [(("passed", "passed"), [0]), (("passed", "failed"), [1]), (("failed", "passed"), [1])],
+)
+def test_on_main_a_test_run_by_two_stages_is_recorded_once(monkeypatch, tmp_path, outcomes, main):
+    # The always stage and the whole suite both run an always-marked test: one run on main.
+    FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
+    in_ci(monkeypatch, "refs/heads/main")
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: None)
+    f = flagger(tmp_path, tier="main")
+    a = FakeAdapter(script=[(0, flagged_outcome("t::f", o, 5)) for o in outcomes])
+    always = Step("always", ".", "run", ["-m", "always"], None, "")
+    fr = FlakyRun(f.cfg, 1, NOTHING, f)
+    assert run([always, tests_step()], a, fail_fast_tests=False, flaky=fr) == 0
+    assert History.load(tmp_path / HISTORY).tests["t::f"].main == main
+
+
+def test_on_main_a_flake_in_two_stages_is_recorded_once(monkeypatch, tmp_path):
+    FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/heads/main")
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: None)
+    f = flagger(tmp_path, tier="main")
+    flake = [(1, events([], ["t::a"])), (0, events(["t::a"]))]
+    always = Step("always", ".", "run", ["-m", "always"], None, "")
+    fr = FlakyRun(f.cfg, 1, NOTHING, f)
+    assert (
+        run([always, tests_step()], FakeAdapter(script=flake * 2), fail_fast_tests=False, flaky=fr)
+        == 0
+    )
+    assert History.load(tmp_path / HISTORY).tests["t::a"].main == [1]
+
+
 def test_a_history_that_cannot_be_fetched_changes_no_verdict(monkeypatch, tmp_path, capsys):
     FakeIssues(monkeypatch)
     in_ci(monkeypatch, "refs/heads/main")

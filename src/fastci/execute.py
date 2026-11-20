@@ -256,6 +256,7 @@ class Flagger:
         self.lines: list[str] = []  # what goes to the job summary
         self.issues: dict[str, issues.Issue] | None = None  # None: not read
         self.history: History | None = None  # on main only
+        self.recorded: dict[str, bool] = {}  # this run's outcome per test: failed
         self.laptop = ctx.spec.capped
         env = os.environ
         ref = env.get("GITHUB_REF", "")
@@ -374,13 +375,24 @@ class Flagger:
         for id in res.flagged:
             if id in res.outcomes:
                 before = self.history.rate(id)
-                failed = res.outcomes[id] == "failed"
-                self.history.record(id, failed, self._where(id, res, date))
+                self._add(id, res.outcomes[id] == "failed", res, date)
                 if self.history.rate(id) != before:
                     changed.add(id)
         for id in flaky:
-            self.history.record(id, True, self._where(id, res, date))
+            self._add(id, True, res, date)
         return changed
+
+    def _add(self, id: str, failed: bool, res: results.Results, date: str) -> None:
+        """One outcome per test per run, though two stages may run it: failed if it
+        failed in either."""
+        assert self.history is not None
+        if id in self.recorded:
+            if self.recorded[id] or not failed:
+                return
+            entry = self.history.tests[id]
+            entry.main = entry.main[:-1]  # this run's pass becomes its failure
+        self.history.record(id, failed, self._where(id, res, date))
+        self.recorded[id] = failed
 
     def _where(self, id: str, res: results.Results, date: str) -> dict:
         return {"sha": self.sha, "run": self.run, "date": date, "error": res.errors.get(id, "")}
