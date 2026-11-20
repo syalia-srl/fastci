@@ -297,9 +297,9 @@ class Flagger:
         """The open flaky issues, by node id; on a laptop offline, its last copy."""
         if self.repo and self.token:
             try:
-                # On a laptop a dead network must not hold up the tests.
-                timeout = 5 if self.laptop else 60
-                self.issues = issues.listed(self.repo, self.token, self.cfg.label, timeout)
+                # On a laptop a dead network must not hold up the tests: 5 seconds in all.
+                timeout, total = (5, 5) if self.laptop else (60, None)
+                self.issues = issues.listed(self.repo, self.token, self.cfg.label, timeout, total)
             except Exception as e:
                 self._say(f"could not read the flaky issues: {e}")
         elif not self.laptop:

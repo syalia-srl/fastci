@@ -13,6 +13,7 @@ import json
 import re
 import urllib.parse
 from dataclasses import dataclass
+from time import monotonic
 
 from . import fetch
 from .flaky import Entry
@@ -48,15 +49,22 @@ def _next(link: str | None) -> str | None:
     return None
 
 
-def listed(repo: str, token: str, label: str, timeout: float = 60) -> dict[str, Issue]:
+def listed(
+    repo: str, token: str, label: str, timeout: float = 60, total: float | None = None
+) -> dict[str, Issue]:
     """Every issue with ``label``, open and closed, by the node id in its marker.
-    Of two issues for one test, an open one wins."""
+    Of two issues for one test, an open one wins. ``timeout`` bounds each read,
+    ``total`` all of them: past it, TimeoutError."""
     url = (
         f"{fetch.API}/repos/{repo}/issues?labels={urllib.parse.quote(label)}&state=all&per_page=100"
     )
     found: dict[str, Issue] = {}
+    deadline = None if total is None else monotonic() + total
     while url:
-        with fetch._get(url, token, timeout=timeout) as r:
+        left = timeout if deadline is None else min(timeout, deadline - monotonic())
+        if left <= 0:
+            raise TimeoutError(f"gave up after {total:g} seconds")
+        with fetch._get(url, token, timeout=left) as r:
             items = json.load(r)
             url = _next(r.headers.get("Link"))
         for it in items:

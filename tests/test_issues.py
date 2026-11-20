@@ -67,6 +67,26 @@ def test_listed_follows_pages_and_skips_pull_requests(gh):
     }
 
 
+def test_listed_gives_up_at_its_total_deadline(gh, monkeypatch):
+    # Each read takes 2 seconds: the per-read timeout alone would let the pages go on.
+    pages, _, got = gh
+    pages[FIRST] = ([item(1, "tests/a.py::x")], "p2")
+    pages["p2"], pages["p3"], pages["p4"] = ([], "p3"), ([], "p4"), ([], None)
+    clock, timeouts = [0.0], []
+    get = fetch._get
+
+    def slow(url, token, follow=True, timeout=60):
+        timeouts.append(timeout)
+        clock[0] += 2
+        return get(url, token, follow, timeout)
+
+    monkeypatch.setattr(fetch, "_get", slow)
+    monkeypatch.setattr(issues, "monotonic", lambda: clock[0])
+    with pytest.raises(TimeoutError, match="gave up after 5 seconds"):
+        issues.listed("o/r", "t", "flaky", timeout=5, total=5)
+    assert got == [FIRST, "p2", "p3"] and timeouts == [5, 3, 1]
+
+
 def test_listed_keys_by_the_marker_exactly_not_the_title(gh):
     pages, _, _ = gh
     long = "tests/t.py::x[a b]"

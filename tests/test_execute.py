@@ -380,8 +380,8 @@ class FakeIssues:
         for name in ("open_issue", "edit", "comment", "set_open"):
             monkeypatch.setattr(issues, name, self.recorder(name))
 
-    def listed(self, repo, token, label, timeout=60):
-        self.calls.append(("listed", label, timeout))
+    def listed(self, repo, token, label, timeout=60, total=None):
+        self.calls.append(("listed", label, timeout, total))
         if self.error:
             raise self.error
         return self.found
@@ -720,7 +720,7 @@ def test_a_laptop_never_writes_and_reads_its_copy_when_offline(monkeypatch, tmp_
     copy.parent.mkdir()
     copy.write_text(json.dumps({"t::f": 5}))
     code, a = run_flagged(flagger(tmp_path, tier="local"))
-    assert code == 0 and gh.writes() == [] and gh.calls[0][2] == 5
+    assert code == 0 and gh.writes() == [] and gh.calls[0][2:] == (5, 5)
     with open(a.envs[0]["FASTCI_FLAGGED"]) as f:
         assert json.load(f) == {"t::f": 5}
     err = capsys.readouterr().err
