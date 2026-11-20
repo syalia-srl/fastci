@@ -179,3 +179,33 @@ def test_history_round_trips_node_ids(tmp_path):
     data = json.loads(p.read_text())
     assert data["version"] == 1 and set(data["tests"]) == set(ids)
     assert History.load(p) == h
+
+
+def streak(h: History, runs: int, reached_at: int | None = None, fail_at: int | None = None):
+    """Whether each of ``runs`` runs on main unflags t::a: a reaching change lands at
+    run ``reached_at``, and run ``fail_at`` fails."""
+    return [h.unflag_due("t::a", i == reached_at, i == fail_at, 20) for i in range(1, runs + 1)]
+
+
+def test_a_clean_streak_without_a_reaching_change_never_unflags():
+    assert not any(streak(History(), 40))
+
+
+def test_a_reaching_change_then_20_clean_runs_unflags_on_the_20th():
+    assert streak(History(), 20, reached_at=1) == [False] * 19 + [True]
+
+
+def test_a_failure_on_the_19th_restarts_the_count():
+    due = streak(History(), 39, reached_at=1, fail_at=19)
+    assert due.index(True) == 38  # 20 clean runs after the 19th, which failed
+
+
+def test_a_failure_does_not_undo_the_landing():
+    h = History()
+    h.unflag_due("t::a", True, True, 20)
+    assert h.tests["t::a"].landed and h.tests["t::a"].clean == 0
+
+
+def test_unflag_after_zero_never_unflags():
+    h = History()
+    assert not any(h.unflag_due("t::a", True, False, 0) for _ in range(40))

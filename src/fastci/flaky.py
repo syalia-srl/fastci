@@ -191,6 +191,18 @@ class History:
             e.last_failure = where
         return e
 
+    def unflag_due(self, id: str, reached: bool, failed: bool, unflag_after: int) -> bool:
+        """Count one run on main of a flagged test toward leaving the list: whether a
+        change that reaches it has landed and main has since run it ``unflag_after``
+        times in a row without a failure. 0 never unflags."""
+        e = self.tests.setdefault(id, Entry())
+        e.landed = e.landed or reached
+        if failed:
+            e.clean = 0
+        elif e.landed:
+            e.clean += 1
+        return unflag_after > 0 and e.clean >= unflag_after
+
     def rate(self, id: str) -> tuple[int, int]:
         """(failed, runs) on main."""
         e = self.tests.get(id)
