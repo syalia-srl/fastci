@@ -22,9 +22,10 @@ def test_once():
 """
 
 
-def fastci(repo):
+def fastci(repo, **extra):
     env = {k: v for k, v in os.environ.items() if not k.startswith(("FASTCI_", "GITHUB_"))}
     env["CI"] = "true"
+    env.update(extra)
     return subprocess.run(
         [sys.executable, "-m", "fastci.cli", "--tier", "pr", "--base", "HEAD~1"],
         cwd=repo,
@@ -57,6 +58,65 @@ def test_a_flake_is_forgiven_only_where_the_change_cannot_reach_it(sample, tmp_p
         "tests/test_once.py::test_once\n          failed, then passed;"
         " this change does not reach it" in p.stderr
     )
+
+
+LATER = """import os
+
+import pytest
+
+
+@pytest.mark.always
+def test_later():
+    assert not os.path.exists({later!r})
+"""
+
+BROKEN = """import os
+
+if os.path.exists({broken!r}):
+    raise ImportError("this module is broken")
+
+
+def test_fine():
+    pass
+"""
+
+
+@pytest.fixture
+def forgiven(sample, tmp_path):
+    """A recorded sample whose last commit cannot reach the flaky test; touching
+    ``later`` fails test_later, touching ``broken`` breaks test_zbroken's import."""
+    marker, broken = tmp_path / "marker", tmp_path / "broken"
+    tests = sample / "tests"
+    (tests / "test_once.py").write_text(FLAKY.format(marker=str(marker)))
+    (tests / "test_zlater.py").write_text(LATER.format(later=str(tmp_path / "later")))
+    (tests / "test_zbroken.py").write_text(BROKEN.format(broken=str(broken)))
+    sh(sample, "git", "add", "tests")
+    commit(sample, "add a flaky test")
+    marker.touch()
+    code, out, err = run_testmap(sample, "record", "--", "-q", "-p", "no:cacheprovider")
+    assert code == 0, err + out
+    calc = sample / "src" / "sample" / "calc.py"
+    calc.write_text(calc.read_text().replace("return a + b", "return b + a"))
+    commit(sample)
+    marker.unlink()
+    return tmp_path
+
+
+def test_a_stop_early_flag_pytest_reads_elsewhere_still_runs_the_rest(sample, forgiven):
+    (forgiven / "later").touch()
+    p = fastci(sample, PYTEST_ADDOPTS="-x -p no:cacheprovider")
+    assert p.returncode == 1, p.stderr + p.stdout
+    assert "test_once\n          failed, then passed; this change does not reach it" in p.stderr
+    assert "test_zlater.py::test_later\n          failed, then failed again" in p.stderr
+
+
+def test_a_forgiven_flake_does_not_hide_a_collection_error(sample, forgiven):
+    (forgiven / "broken").touch()
+    p = fastci(sample, PYTEST_ADDOPTS="--continue-on-collection-errors -p no:cacheprovider")
+    assert p.returncode == 1, p.stderr + p.stdout
+    # The always stage itself stays red; the tests stage would catch it with no flake.
+    assert "always failed (exit 1); later stages did not run: tests" in p.stderr
+    assert "test_once\n          failed, then passed; this change does not reach it" in p.stderr
 
 
 @pytest.fixture

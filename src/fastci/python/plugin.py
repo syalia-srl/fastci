@@ -14,7 +14,7 @@ serves both commands:
 - ``FASTCI_DONE=<file>`` (set when fastci resumes a stage stopped early):
   deselect the tests whose node id is listed in that file.
 - ``FASTCI_RESULTS=<file>``: append one JSON line per test event to that file,
-  read back by ``fastci.results``.
+  and one for the session when it ends, read back by ``fastci.results``.
 """
 
 from __future__ import annotations
@@ -199,3 +199,17 @@ if RESULTS:
     @pytest.hookimpl(optionalhook=True)
     def pytest_handlecrashitem(crashitem, report, sched):
         _write({"e": "crashed", "id": crashitem})
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_sessionfinish(session, exitstatus):
+        # What pytest itself counted: a collection error, a coverage threshold or a
+        # plugin adds to testsfailed without a failed test; -x or --maxfail from
+        # addopts or PYTEST_ADDOPTS stop the session without fastci seeing the flag.
+        _write(
+            {
+                "e": "session",
+                "testsfailed": session.testsfailed,
+                "stopped": bool(session.shouldfail or session.shouldstop),
+                "status": int(exitstatus),
+            }
+        )

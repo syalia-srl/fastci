@@ -98,6 +98,33 @@ def test_a_pytest_started_inside_an_xdist_worker_writes_its_results(
     assert r.passed == {"test_a.py::test_ok"}
 
 
+@pytest.mark.parametrize(
+    "args,testsfailed,stopped",
+    [
+        ([], 1, False),
+        (["-o", "addopts=-x"], 1, True),
+        (["--continue-on-collection-errors"], 2, False),
+        (["--cov=.", "--cov-fail-under=100", "-p", "pytest_cov"], 2, False),
+    ],
+)
+def test_the_session_line_says_what_pytest_counted(
+    pytester, tmp_path, monkeypatch, args, testsfailed, stopped
+):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    pytester.makepyfile(test_a="def test_bad(): assert 0\ndef test_ok(): pass\n")
+    if "--continue-on-collection-errors" in args:
+        pytester.makepyfile(test_b="raise ImportError('broken')")
+    if "--cov=." in args:
+        pytester.makepyfile(lib="def unused():\n    return 1\n")
+    pytester.runpytest_subprocess("-p", "fastci.python.plugin", *args)
+    r = results.read(str(out), signalled=False)
+    assert r.failed == ["test_a.py::test_bad"] and r.failed_reports == 1
+    assert (r.testsfailed, r.stopped) == (testsfailed, stopped)
+    assert r.explained is (testsfailed == 1)
+    assert ("test_a.py::test_ok" in r.passed) is not stopped
+
+
 def test_no_file_is_none(tmp_path):
     assert results.read(str(tmp_path / "missing"), signalled=False) is None
 

@@ -39,14 +39,19 @@ class FakeAdapter:
         return code
 
 
-def events(passed=(), failed=(), hung=()):
-    """Results-file lines: tests that passed, failed, or started and never finished."""
+def events(passed=(), failed=(), hung=(), stopped=False, testsfailed=None):
+    """Results-file lines: tests that passed, failed, or started and never finished,
+    then the session line pytest writes when it ends (not when a test killed it).
+    ``testsfailed`` defaults to the failed tests: pytest counted nothing else."""
     out = []
     for t in passed:
         out += [{"e": "started", "id": t}, outcome(t, "passed"), {"e": "finished", "id": t}]
     for t in failed:
         out += [{"e": "started", "id": t}, outcome(t, "failed"), {"e": "finished", "id": t}]
-    return out + [{"e": "started", "id": t} for t in hung]
+    if hung:
+        return out + [{"e": "started", "id": t} for t in hung]
+    n = len(failed) if testsfailed is None else testsfailed
+    return out + [{"e": "session", "testsfailed": n, "stopped": stopped, "status": int(n > 0)}]
 
 
 def outcome(t, result):
@@ -294,7 +299,8 @@ def test_a_cap_kill_blames_no_test(capsys):
 
 
 def test_fail_fast_resumes_after_a_forgiven_flake():
-    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"])), (0, events(["c"]))])
+    first = events(["b"], ["a"], stopped=True)
+    a = FakeAdapter(script=[(1, first), (0, events(["a"])), (0, events(["c"]))])
     assert run([tests_step()], a, fail_fast_tests=True, flaky=flaky()) == 0
     assert len(a.calls) == 3 and a.done == [{"a", "b"}]
     assert a.calls[2][0] == ["tests/test_a.py"] and "--maxfail=1" in a.calls[2][1]
@@ -315,12 +321,36 @@ def test_a_retry_round_runs_every_failed_test(stop):
     step = Step("tests", ".", "run", ["-q", *stop, "-v"], ["tests/test_a.py"], "")
     a = FakeAdapter(script=[(1, events([], ["a", "b"])), (0, events(["a", "b"])), (0, [])])
     assert run([step], a, fail_fast_tests=False, flaky=flaky()) == 0
-    assert a.calls[1][1] == ["-q", "-v"]
+    assert a.calls[1][1] == ["-q", "-v", "--maxfail=0"]
 
 
 @pytest.mark.parametrize("stop", STOP_EARLY)
 def test_any_stop_early_flag_resumes_after_a_forgiven_flake(stop):
     step = Step("tests", ".", "run", ["-q", *stop], ["tests/test_a.py"], "")
-    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"])), (0, events(["c"]))])
+    first = events(["b"], ["a"], stopped=True)
+    a = FakeAdapter(script=[(1, first), (0, events(["a"])), (0, events(["c"]))])
     assert run([step], a, fail_fast_tests=False, flaky=flaky()) == 0
     assert len(a.calls) == 3 and a.done == [{"a", "b"}]
+
+
+def test_a_session_pytest_stopped_resumes_whatever_the_stage_arguments():
+    # -x in addopts, PYTEST_ADDOPTS or a combined -xq: only pytest knows it stopped.
+    first = events(["b"], ["a"], stopped=True)
+    a = FakeAdapter(script=[(1, first), (0, events(["a"])), (1, events([], ["c"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 1
+    assert len(a.calls) == 4 and a.done == [{"a", "b"}]
+
+
+def test_a_session_that_ran_everything_does_not_resume():
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 0
+    assert len(a.calls) == 2
+
+
+# testsfailed 2: a coverage threshold or a collection error; no session line: pytest
+# never said what it counted.
+@pytest.mark.parametrize("first", [events(["b"], ["a"], testsfailed=2), events(["b"], ["a"])[:-1]])
+def test_a_failure_no_failed_test_explains_keeps_the_exit_code(capsys, first):
+    a = FakeAdapter(script=[(1, first), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == 1
+    assert "pytest counted failures no failed test explains" in capsys.readouterr().err

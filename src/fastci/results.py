@@ -1,8 +1,9 @@
 """Read the results file the pytest plugin writes under ``FASTCI_RESULTS``.
 
 One JSON line per event: ``started`` before a test, ``outcome`` for each failed
-phase and for the call phase, ``finished`` after it, and ``crashed`` when an
-xdist worker died running it.
+phase and for the call phase, ``finished`` after it, ``crashed`` when an
+xdist worker died running it, and ``session`` when pytest ended: the failures
+it counted and whether it stopped early.
 """
 
 from __future__ import annotations
@@ -22,6 +23,15 @@ class Results:
     crashed: set[str] = field(default_factory=set)
     errors: dict[str, str] = field(default_factory=dict)
     outcomes: dict[str, str] = field(default_factory=dict)
+    failed_reports: int = 0  # failed outcome lines; a test may fail in call and teardown
+    testsfailed: int | None = None  # pytest's own count; None: the session never ended
+    stopped: bool = False  # pytest stopped before running every test (-x, --maxfail)
+
+    @property
+    def explained(self) -> bool:
+        """Whether every failure pytest counted is a failed test in these results:
+        no collection error, coverage threshold or plugin failed the run."""
+        return self.testsfailed is not None and self.testsfailed == self.failed_reports
 
 
 def signalled(code: int) -> bool:
@@ -45,6 +55,9 @@ def read(path: str, signalled: bool) -> Results | None:
             if not line.strip():
                 continue
             ev = json.loads(line)
+            if ev["e"] == "session":
+                r.testsfailed, r.stopped = ev["testsfailed"], ev["stopped"]
+                continue
             nodeid = ev["id"]
             if ev["e"] == "started":
                 started.append(nodeid)
@@ -53,6 +66,7 @@ def read(path: str, signalled: bool) -> Results | None:
             elif ev["e"] == "crashed":
                 r.crashed.add(nodeid)
             elif ev["outcome"] == "failed":
+                r.failed_reports += 1
                 if nodeid not in r.errors:
                     r.failed.append(nodeid)
                     r.errors[nodeid] = ev["error"]

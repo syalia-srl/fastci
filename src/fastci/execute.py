@@ -131,8 +131,9 @@ def strip_stop_early(args: list[str]) -> list[str]:
 def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_note) -> int:
     """Run a test stage, retry what failed and judge it: the stage's exit code.
 
-    With -x or --maxfail a forgiven failure may have stopped the stage early, so it
-    runs again without the tests already passed or judged."""
+    When pytest says it stopped early (-x or --maxfail, wherever they were set), a
+    forgiven failure must not end the stage, so it runs again without the tests
+    already passed or judged."""
     rescued: set[str] = set()  # passed on retry, in any run of the stage
     done: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="fastci-") as tmp:
@@ -169,7 +170,8 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                 retry = [t for t in retry if t not in rescued]
                 if not retry:
                     break
-                c, p = run(retry, strip_stop_early(strip_xdist(args)), {})
+                # --maxfail=0 last: -x in addopts or PYTEST_ADDOPTS comes before it.
+                c, p = run(retry, [*strip_stop_early(strip_xdist(args)), "--maxfail=0"], {})
                 again = results.read(p, results.signalled(c))
                 if again:
                     rescued |= again.passed & set(retry)
@@ -189,7 +191,13 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                 )
             if any(v.blocks for v in verdicts):
                 return code
-            if args == strip_stop_early(args):
+            if not res.explained:
+                say(
+                    "pytest counted failures no failed test explains"
+                    " (a collection error, a coverage threshold or a plugin); red"
+                )
+                return code
+            if not res.stopped:
                 return 0
             done |= res.passed | set(failed)
 
