@@ -610,13 +610,51 @@ def test_on_main_a_flake_in_two_stages_is_recorded_once(monkeypatch, tmp_path):
 
 
 def test_a_history_that_cannot_be_fetched_changes_no_verdict(monkeypatch, tmp_path, capsys):
-    FakeIssues(monkeypatch)
+    gh = FakeIssues(monkeypatch, {"t::a": issues.Issue(18, True)})
     in_ci(monkeypatch, "refs/heads/main")
-    # An artifact without flaky.json: _download's next() raises StopIteration.
     history_artifact(monkeypatch, {}, member="other.txt")
     code, _ = run_flagged(flagger(tmp_path, tier="main"))
     assert code == 0
-    assert "fastci: could not fetch the flaky history" in capsys.readouterr().err
+    line = (
+        "fastci: could not fetch the flaky history (the artifact holds no flaky.json file);"
+        " this run does not write it"
+    )
+    assert line in capsys.readouterr().err
+    # Nothing to upload, so the history main has stays the newest one.
+    assert not (tmp_path / HISTORY).exists()
+    # A body rendered from no history would wipe the issue's counts.
+    assert [c[0] for c in gh.writes()] == []
+
+
+def test_a_failed_history_download_writes_no_history(monkeypatch, tmp_path, capsys):
+    FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/heads/main")
+    history_artifact(monkeypatch, {})
+
+    def fail(*a, **k):
+        raise urllib.error.HTTPError("u", 500, "Server Error", {}, None)
+
+    monkeypatch.setattr(fetch, "_get", fail)
+    code, _ = run_flagged(flagger(tmp_path, tier="main"))
+    assert code == 0 and not (tmp_path / HISTORY).exists()
+    assert "could not fetch the flaky history (HTTP Error 500" in capsys.readouterr().err
+
+
+def test_a_history_that_does_not_parse_writes_no_history(monkeypatch, tmp_path):
+    FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/heads/main")
+    history_artifact(monkeypatch, [])
+    run_flagged(flagger(tmp_path, tier="main"))
+    assert not (tmp_path / HISTORY).exists()
+
+
+def test_a_history_entry_with_a_new_key_is_kept(monkeypatch, tmp_path):
+    FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/heads/main")
+    old = {"version": 1, "tests": {"t::a": {"main": [0, 0], "added_later": 1}}}
+    history_artifact(monkeypatch, old)
+    run_flagged(flagger(tmp_path, tier="main"))
+    assert History.load(tmp_path / HISTORY).tests["t::a"].main == [0, 0, 1]
 
 
 def test_with_marks_nothing_is_called_and_the_mark_line_prints(monkeypatch, tmp_path, capsys):

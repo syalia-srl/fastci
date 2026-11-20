@@ -3,6 +3,8 @@
 import io
 import json
 
+import pytest
+
 from fastci import fetch
 
 
@@ -116,3 +118,18 @@ def test_download_extracts_the_member_with_the_suffix(monkeypatch, tmp_path):
     assert out.read_bytes() == b'{"version": 1}'
     fetch._download("u", "t", str(tmp_path / "map.gz"))
     assert (tmp_path / "map.gz").read_bytes() == b"map"
+
+
+def test_download_names_the_member_it_did_not_find(monkeypatch, tmp_path):
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("other.txt", b"x")
+
+    class R(io.BytesIO):
+        headers = {}
+
+    monkeypatch.setattr(fetch, "_get", lambda url, token, follow=True: R(buf.getvalue()))
+    with pytest.raises(FileNotFoundError, match="the artifact holds no flaky.json file"):
+        fetch._download("u", "t", str(tmp_path / "flaky.json"), suffix="flaky.json")

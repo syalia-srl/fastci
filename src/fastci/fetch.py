@@ -97,7 +97,9 @@ def _download(url: str, token: str, out: str, suffix: str = ".json.gz") -> None:
     location = first.headers.get("Location")
     data = urllib.request.urlopen(location, timeout=120).read() if location else first.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        member = next(n for n in z.namelist() if n.endswith(suffix))
+        member = next((n for n in z.namelist() if n.endswith(suffix)), None)
+        if member is None:
+            raise FileNotFoundError(f"the artifact holds no {suffix} file")
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         with open(out, "wb") as f:
             f.write(z.read(member))

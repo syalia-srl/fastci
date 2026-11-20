@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .config import FlakyConfig
@@ -153,12 +153,27 @@ class History:
     tests: dict[str, Entry] = field(default_factory=dict)
 
     @classmethod
+    def read(cls, path: str | Path) -> History:
+        """The history in ``path``; OSError or ValueError when it is not one. An entry
+        it cannot read is left out, and a key it does not know is ignored."""
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("tests"), dict):
+            raise ValueError(f"{path} is not a flaky history")
+        known = {f.name for f in fields(Entry)}
+        tests = {}
+        for t, e in data["tests"].items():
+            if isinstance(e, dict):
+                entry = Entry(**{k: v for k, v in e.items() if k in known})
+                if isinstance(entry.main, list) and all(x in (0, 1) for x in entry.main):
+                    tests[t] = entry
+        return cls(tests)
+
+    @classmethod
     def load(cls, path: str | Path) -> History:
         """The history in ``path``; empty when the file is missing or unreadable."""
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-            return cls({t: Entry(**e) for t, e in data["tests"].items()})
-        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return cls.read(path)
+        except (OSError, ValueError):
             return cls()
 
     def save(self, path: str | Path) -> None:

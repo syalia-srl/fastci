@@ -146,6 +146,29 @@ def test_history_unreadable_file_loads_empty(tmp_path, content):
     assert History.load(tmp_path / "missing.json").tests == {}
 
 
+def test_history_keeps_the_entries_it_can_read_and_ignores_unknown_keys(tmp_path):
+    p = tmp_path / "flaky.json"
+    tests = {
+        "t.py::test_new": {"main": [1, 0], "added_later": True},
+        "t.py::test_null": {"main": None},
+        "t.py::test_text": "x",
+        "t.py::test_ok": {"main": [0], "issue": 9},
+    }
+    p.write_text(json.dumps({"version": 2, "tests": tests}))
+    h = History.read(p)
+    assert set(h.tests) == {"t.py::test_new", "t.py::test_ok"}
+    assert h.tests["t.py::test_new"].main == [1, 0] and h.tests["t.py::test_ok"].issue == 9
+    assert History.load(p) == h
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"version": 1, "tests": 3}', "[]"])
+def test_history_read_refuses_a_file_that_is_not_one(tmp_path, content):
+    p = tmp_path / "flaky.json"
+    p.write_text(content)
+    with pytest.raises(ValueError):
+        History.read(p)
+
+
 def test_history_round_trips_node_ids(tmp_path):
     ids = ["t.py::test_x[svc-api]", "t.py::test_y[a b/c]", "t.py::test_z[ñandú-日本]"]
     h = History()

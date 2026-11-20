@@ -314,21 +314,26 @@ class Flagger:
             return None
         return copy if isinstance(copy, dict) else None
 
-    def _fetch_history(self) -> History:
-        """The newest history main uploaded; empty when there is none."""
-        path = os.path.join(self.root, HISTORY)
+    def _fetch_history(self) -> History | None:
+        """The newest history main uploaded; empty when there is none. None when one
+        may exist but cannot be read: this run writes none, so it replaces nothing."""
         if not (self.repo and self.token):
-            self._say("could not fetch the flaky history: no GitHub repository or token")
-            return History()
-        try:
-            art = fetch.newest_artifact(self.repo, "fastci-flaky", self.default_branch, self.token)
-            if art is not None:
-                fetch._download(art["archive_download_url"], self.token, path, "flaky.json")
-        except Exception as e:
-            why = str(e) or type(e).__name__  # StopIteration: no flaky.json in the artifact
-            self._say(f"could not fetch the flaky history ({why}); it starts empty")
-            return History()
-        return History.load(path)
+            why = "no GitHub repository or token"
+        else:
+            try:
+                art = fetch.newest_artifact(
+                    self.repo, "fastci-flaky", self.default_branch, self.token
+                )
+                if art is None:
+                    return History()
+                with tempfile.TemporaryDirectory(prefix="fastci-") as tmp:
+                    path = os.path.join(tmp, "flaky.json")
+                    fetch._download(art["archive_download_url"], self.token, path, "flaky.json")
+                    return History.read(path)
+            except Exception as e:
+                why = str(e) or type(e).__name__
+        self._say(f"could not fetch the flaky history ({why}); this run does not write it")
+        return None
 
     def after(
         self, verdicts: list[Verdict], res: results.Results, reach: Reach
@@ -417,7 +422,7 @@ class Flagger:
                 number, how = issue.number, "" if issue.open else " (reopened)"
                 if not issue.open:
                     issues.set_open(repo, token, number, True)
-                if self.main:
+                if self.main and self.history is not None:
                     issues.edit(repo, token, number, text)
             self.issues[id] = issues.Issue(number, True)
             if self.history is not None:
