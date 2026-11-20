@@ -34,6 +34,8 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "$notes" dist/*
           fi
   pypi:
+    # Off until the PyPI trusted publisher exists: set the repo variable PYPI_PUBLISH=true.
+    if: vars.PYPI_PUBLISH == 'true'
     needs: release
     runs-on: ubuntu-latest
     environment: pypi
