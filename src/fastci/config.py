@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 RELEASE_ONLY = ["slow", "gpu", "browser", "e2e", "bench"]
+PYTEST_MARKS = ("skip", "skipif", "xfail", "parametrize", "usefixtures", "filterwarnings")
 
 
 class ConfigError(ValueError):
@@ -229,8 +230,12 @@ def _flaky(table: dict, where: str) -> FlakyConfig:
         raise ConfigError(f'{w} store must be "issues", "marks" or "both"')
     if flaky.flagged not in ("run", "skip"):
         raise ConfigError(f'{w} flagged must be "run" or "skip"')
+    if not flaky.mark:
+        raise ConfigError(f"{w} mark must not be empty")
     if flaky.mark in ("always", *RELEASE_ONLY):
         raise ConfigError(f"{w} mark must not be one of fastci's own marks ({flaky.mark!r})")
+    if flaky.mark in PYTEST_MARKS:
+        raise ConfigError(f"{w} mark must not be pytest's own mark ({flaky.mark!r})")
     return flaky
 
 

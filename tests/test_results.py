@@ -315,6 +315,30 @@ def test_a_mark_naming_one_of_fastcis_own_flags_nothing(pytester, tmp_path, monk
     assert r.flagged == {} and r.failed == ["test_m.py::test_x"]
 
 
+@pytest.mark.parametrize(
+    "name,mark",
+    [
+        ("skipif", "skipif(False, reason='no')"),
+        ("usefixtures", "usefixtures()"),
+        ("filterwarnings", "filterwarnings('ignore')"),
+        ("parametrize", "parametrize('x', [1])"),
+    ],
+)
+def test_a_mark_naming_one_of_pytests_own_flags_nothing(
+    pytester, tmp_path, monkeypatch, name, mark
+):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.setenv("FASTCI_FLAKY_MARK", name)
+    x = "x" if name == "parametrize" else ""
+    pytester.makepyfile(test_m=f"import pytest\n@pytest.mark.{mark}\ndef test_x({x}): assert 0\n")
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist", "--markers")
+    assert "a known flaky test" not in p.stdout.str()
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist")
+    p.assert_outcomes(failed=1)
+    assert results.read(str(out), signalled=False).flagged == {}
+
+
 def test_the_mark_name_is_configured(pytester, tmp_path, monkeypatch):
     out = tmp_path / "r.jsonl"
     monkeypatch.setenv("FASTCI_RESULTS", str(out))

@@ -21,7 +21,8 @@ serves both commands:
   failure, so it fails neither pytest's exit code nor ``--maxfail``, while the
   results file keeps the real outcome. ``FASTCI_SKIP_FLAGGED=1`` deselects them.
   Only fastci sets one of the two variables; without either, a plain ``pytest``
-  run flags nothing. A mark name that is one of fastci's own flags nothing.
+  run flags nothing. A mark name that is one of fastci's or pytest's own flags
+  nothing.
 """
 
 from __future__ import annotations
@@ -113,10 +114,11 @@ MARKS = {
     "e2e": "drives the whole product; fastci runs it only on a release branch",
     "bench": "measures speed; fastci runs it only on a release branch",
 }
+PYTEST_MARKS = ("skip", "skipif", "xfail", "parametrize", "usefixtures", "filterwarnings")
 # Flagging is on only when fastci runs pytest, which sets one of the two variables.
 FLAGGING = bool(FLAGGED or FLAKY_MARK)
 FLAKY_MARK = FLAKY_MARK or "quarantine"
-if FLAKY_MARK in MARKS:
+if FLAKY_MARK in MARKS or FLAKY_MARK in PYTEST_MARKS:
     FLAKY_MARK = None
 else:
     MARKS[FLAKY_MARK] = 'a known flaky test, ("#N") its issue; its failure never fails the run'
