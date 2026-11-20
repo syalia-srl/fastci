@@ -27,7 +27,7 @@ import fnmatch
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import TestsConfig
@@ -55,6 +55,7 @@ class Pick:
     tests: set[str]
     files: set[str]
     why: dict[str, str]
+    reach: dict[str, float] = field(default_factory=dict)  # smallest share of the suite per test
 
     def lines(self) -> list[str]:
         return sorted(self.tests | self.files)
@@ -139,10 +140,14 @@ class Picker:
         why: dict[str, str] = {}
         tests: set[str] = set()
         files: set[str] = set()
+        reach: dict[str, float] = {}
+        suite = len(self.tm.tests) or 1
 
-        def add(ts: set[str], reason: str) -> None:
+        def add(ts: set[str], reason: str, share: int | None) -> None:
             for t in ts:
                 why.setdefault(t, reason)
+                if share is not None:
+                    reach[t] = min(reach.get(t, 1.0), share / suite)
             tests.update(ts)
 
         for path in diff:
@@ -156,20 +161,21 @@ class Picker:
                 continue
             if in_tests_dir(path):
                 stem = os.path.splitext(os.path.basename(path))[0]
-                add(self.naming({os.path.basename(path), stem}), f"{path} (test helper) named")
+                named = self.naming({os.path.basename(path), stem})
+                add(named, f"{path} (test helper) named", len(named))
                 continue
             if path in self.tm.reads:
-                add(self.narrow(self.tm.reads[path], {os.path.basename(path)}), f"{path} read")
+                idx = self.tm.reads[path]
+                add(self.narrow(idx, {os.path.basename(path)}), f"{path} read", len(idx))
             if not path.endswith(".py"):
-                add(
-                    self.naming({os.path.basename(path), "/".join(path.split("/")[-2:])}),
-                    f"{path} named",
-                )
+                named = self.naming({os.path.basename(path), "/".join(path.split("/")[-2:])})
+                add(named, f"{path} named", len(named))
                 continue
             entry = self.tm.files.get(path)
             if entry is None:
                 stem = os.path.splitext(os.path.basename(path))[0]
-                add(self.naming({stem}), f"{path} is new to the map; tests naming it")
+                named = self.naming({stem})
+                add(named, f"{path} is new to the map; tests naming it", len(named))
                 continue
             for rev, lines in ((head, head_lines), (base, base_lines)):
                 src = self.show(rev, path)
@@ -182,22 +188,24 @@ class Picker:
                         continue
                     q = enclosing(funcs, n)
                     if q and q in entry.funcs:
-                        add(
-                            self.narrow(self.line_tests(entry, q, body), {q.split(".")[-1]}),
-                            f"{path}:{q}",
-                        )
+                        idx = self.line_tests(entry, q, body)
+                        add(self.narrow(idx, {q.split(".")[-1]}), f"{path}:{q}", len(idx))
                     elif q is None and IMPORT.match(body):
-                        add(self.fastest(entry.tests), f"{path} imports")
+                        add(self.fastest(entry.tests), f"{path} imports", len(entry.tests))
                     else:
                         stem = os.path.splitext(os.path.basename(path))[0]
-                        add(self.narrow(entry.tests, {stem}), f"{path} module level or new code")
+                        add(
+                            self.narrow(entry.tests, {stem}),
+                            f"{path} module level or new code",
+                            len(entry.tests),
+                        )
 
         for i in self.tm.always:
-            add({self.tm.tests[i]}, "marked always")
+            add({self.tm.tests[i]}, "marked always", None)
         for f in self.cfg.always:
             files.add(f)
             why.setdefault(f, "listed in always")
-        return Pick(False, tests, files, why)
+        return Pick(False, tests, files, why, reach)
 
     def line_tests(self, entry, q: str, body: str) -> set[int]:
         start, end, func_tests = entry.funcs[q]
