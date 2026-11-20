@@ -15,6 +15,11 @@ serves both commands:
   deselect the tests whose node id is listed in that file.
 - ``FASTCI_RESULTS=<file>``: append one JSON line per test event to that file,
   and one for the session when it ends, read back by ``fastci.results``.
+- ``FASTCI_FLAGGED=<file>`` (a JSON object ``{nodeid: issue number or null}``)
+  and the mark named by ``FASTCI_FLAKY_MARK`` (``quarantine`` by default) flag
+  tests as flaky: a flagged test's failure is reported as a non-strict expected
+  failure, so it fails neither pytest's exit code nor ``--maxfail``, while the
+  results file keeps the real outcome. ``FASTCI_SKIP_FLAGGED=1`` deselects them.
 """
 
 from __future__ import annotations
@@ -23,10 +28,15 @@ import json
 import os
 import sys
 
+import pytest
+
 RECORD = os.environ.get("FASTCI_RECORD")
 SELECT = os.environ.get("FASTCI_SELECT")
 DONE = os.environ.get("FASTCI_DONE")
 RESULTS = os.environ.get("FASTCI_RESULTS")
+FLAGGED = os.environ.get("FASTCI_FLAGGED")
+FLAKY_MARK = os.environ.get("FASTCI_FLAKY_MARK") or "quarantine"
+SKIP_FLAGGED = os.environ.get("FASTCI_SKIP_FLAGGED") == "1"
 ROOT = os.path.realpath(os.environ.get("FASTCI_ROOT", os.getcwd()))
 
 _state: dict = {"test": None, "busy": False}
@@ -100,6 +110,7 @@ MARKS = {
     "browser": "drives a browser; fastci runs it only on a release branch",
     "e2e": "drives the whole product; fastci runs it only on a release branch",
     "bench": "measures speed; fastci runs it only on a release branch",
+    FLAKY_MARK: 'a known flaky test, ("#N") its issue; its failure never fails the run',
 }
 COLLECT = os.environ.get("FASTCI_COLLECT")
 
@@ -149,7 +160,30 @@ def _drop_done(items) -> tuple[list, list]:
     return [i for i in items if i.nodeid not in done], [i for i in items if i.nodeid in done]
 
 
-if SELECT or DONE:
+_listed: dict[str, int | None] = {}
+if FLAGGED:
+    with open(FLAGGED, encoding="utf-8") as f:
+        _listed = json.load(f)
+
+
+def _issue(value) -> int | None:
+    """The issue number in a mark's argument, ``"#776"`` or ``776``."""
+    try:
+        return int(str(value).lstrip("#"))
+    except ValueError:
+        return None
+
+
+def flag(item) -> tuple[bool, int | None]:
+    """Whether the test is flagged as flaky, and its issue number when known."""
+    number = _listed.get(item.nodeid)
+    mark = item.get_closest_marker(FLAKY_MARK)
+    if number is None and mark is not None and mark.args:
+        number = _issue(mark.args[0])
+    return item.nodeid in _listed or mark is not None, number
+
+
+if SELECT or DONE or SKIP_FLAGGED:
 
     def pytest_collection_modifyitems(config, items):
         keep, drop = list(items), []
@@ -158,13 +192,29 @@ if SELECT or DONE:
         if DONE:
             keep, done = _drop_done(keep)
             drop += done
+        if SKIP_FLAGGED:
+            drop += [i for i in keep if flag(i)[0]]
+            keep = [i for i in keep if not flag(i)[0]]
         if drop:
             config.hook.pytest_deselected(items=drop)
         items[:] = keep
 
 
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    flagged, number = flag(item)
+    if flagged:
+        # Read by the results line, which under xdist runs on the controller.
+        report.fastci_flagged = True if number is None else number
+        if report.failed:
+            report.fastci_outcome = "failed"
+            report.outcome = "skipped"
+            report.wasxfail = "flagged flaky" + ("" if number is None else f": #{number}")
+    return report
+
+
 if RESULTS:
-    import pytest
 
     def _write(event: dict) -> None:
         # Under xdist the controller sees every worker's events, and the crashes.
@@ -178,20 +228,22 @@ if RESULTS:
         _write({"e": "started", "id": nodeid})
 
     def pytest_runtest_logreport(report):
-        if report.outcome != "failed" and report.when != "call":
+        outcome = getattr(report, "fastci_outcome", report.outcome)
+        if outcome != "failed" and report.when != "call":
             return
         crash = getattr(report.longrepr, "reprcrash", None)
         error = crash.message.splitlines()[0] if crash and crash.message else ""
-        _write(
-            {
-                "e": "outcome",
-                "id": report.nodeid,
-                "when": report.when,
-                "outcome": report.outcome,
-                "error": error,
-                "dur": report.duration,
-            }
-        )
+        event = {
+            "e": "outcome",
+            "id": report.nodeid,
+            "when": report.when,
+            "outcome": outcome,
+            "error": error,
+            "dur": report.duration,
+        }
+        if hasattr(report, "fastci_flagged"):
+            event["flagged"] = report.fastci_flagged
+        _write(event)
 
     def pytest_runtest_logfinish(nodeid, location):
         _write({"e": "finished", "id": nodeid})

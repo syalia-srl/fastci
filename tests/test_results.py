@@ -1,3 +1,6 @@
+import json
+import os
+
 import pytest
 
 from fastci import results
@@ -149,6 +152,171 @@ def test_the_session_line_says_what_pytest_counted(
     assert (r.testsfailed, r.stopped) == (testsfailed, stopped)
     assert r.explained is (testsfailed == 1)
     assert ("test_a.py::test_ok" in r.passed) is not stopped
+
+
+FLAKY = """
+import pytest
+@pytest.fixture
+def broken():
+    raise RuntimeError("fixture timed out")
+def test_flaky(): assert 0, "timed out"
+def test_bad(): assert 0
+@pytest.mark.parametrize("x", ["a b/c", "d"])
+def test_p(x): assert 0
+def test_setup(broken): pass
+def test_lucky(): pass
+"""
+
+
+def _flag(tmp_path, monkeypatch, flagged: dict) -> str:
+    out = tmp_path / "r.jsonl"
+    listed = tmp_path / "flagged.json"
+    listed.write_text(json.dumps(flagged), encoding="utf-8")
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.setenv("FASTCI_FLAGGED", str(listed))
+    return str(out)
+
+
+def test_a_flagged_failure_does_not_fail_pytest(pytester, tmp_path, monkeypatch):
+    out = _flag(
+        tmp_path,
+        monkeypatch,
+        {
+            "test_f.py::test_flaky": 31,
+            "test_f.py::test_p[a b/c]": None,
+            "test_f.py::test_setup": 9,
+            "test_f.py::test_lucky": 4,
+        },
+    )
+    pytester.makepyfile(test_f=FLAKY)
+    # --maxfail=1 goes on past the flagged failures to the real one, then stops.
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist")
+    p.assert_outcomes(passed=1, failed=2, xfailed=3)
+    os.remove(out)
+    p = pytester.runpytest_subprocess(
+        "-p", "fastci.python.plugin", "-p", "no:xdist", "-rx", "--maxfail=1", "-k", "flaky or bad"
+    )
+    p.assert_outcomes(failed=1, xfailed=1)
+    p.stdout.fnmatch_lines(["*XFAIL*test_flaky*flagged flaky: #31*"])
+    r = results.read(out, signalled=False)
+    assert r.failed == ["test_f.py::test_bad"]
+    assert r.flagged == {"test_f.py::test_flaky": 31}
+    assert r.outcomes["test_f.py::test_flaky"] == "failed"
+    assert r.errors["test_f.py::test_flaky"].startswith("AssertionError: timed out")
+    assert (r.failed_reports, r.testsfailed, r.explained) == (1, 1, True)
+
+
+def test_flagged_outcomes_are_the_real_ones(pytester, tmp_path, monkeypatch):
+    out = _flag(
+        tmp_path,
+        monkeypatch,
+        {
+            "test_f.py::test_flaky": 31,
+            "test_f.py::test_p[a b/c]": None,
+            "test_f.py::test_setup": 9,
+            "test_f.py::test_lucky": 4,
+        },
+    )
+    pytester.makepyfile(test_f=FLAKY)
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist", "-rx")
+    p.stdout.fnmatch_lines(["*XFAIL*test_p?a b/c?*flagged flaky*"])
+    r = results.read(out, signalled=False)
+    assert r.flagged == {
+        "test_f.py::test_flaky": 31,
+        "test_f.py::test_p[a b/c]": None,
+        "test_f.py::test_setup": 9,
+        "test_f.py::test_lucky": 4,
+    }
+    # Only the exact id is flagged: test_p[d] fails the run.
+    assert r.failed == ["test_f.py::test_bad", "test_f.py::test_p[d]"]
+    assert r.outcomes["test_f.py::test_p[a b/c]"] == "failed"
+    assert r.outcomes["test_f.py::test_setup"] == "failed"
+    assert r.outcomes["test_f.py::test_lucky"] == "passed"
+    assert r.passed == {"test_f.py::test_lucky"}
+    assert (r.failed_reports, r.testsfailed, r.explained) == (2, 2, True)
+
+
+def test_a_flagged_pass_is_not_an_error_under_xfail_strict(pytester, tmp_path, monkeypatch):
+    out = _flag(tmp_path, monkeypatch, {"test_f.py::test_ok": 31})
+    pytester.makeini("[pytest]\nxfail_strict = true\n")
+    pytester.makepyfile(test_f="def test_ok(): pass\n")
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist")
+    assert p.ret == 0
+    p.assert_outcomes(passed=1)
+    r = results.read(out, signalled=False)
+    assert r.outcomes == {"test_f.py::test_ok": "passed"} and r.flagged == {
+        "test_f.py::test_ok": 31
+    }
+
+
+MARKED = """
+import pytest
+@pytest.mark.quarantine("#776")
+def test_str(): assert 0
+@pytest.mark.quarantine(12)
+def test_int(): assert 0
+@pytest.mark.quarantine
+def test_bare(): assert 0
+@pytest.mark.hold("#5")
+def test_other(): assert 0
+def test_ok(): pass
+"""
+
+
+def test_the_mark_flags_a_test_with_its_issue(pytester, tmp_path, monkeypatch):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    pytester.makeini("[pytest]\nmarkers =\n    hold: a project's own mark\n")
+    pytester.makepyfile(test_m=MARKED)
+    p = pytester.runpytest_subprocess(
+        "-p", "fastci.python.plugin", "-p", "no:xdist", "-rx", "--strict-markers", "-k", "not other"
+    )
+    assert p.ret == 0
+    p.stdout.fnmatch_lines(["*XFAIL*test_str*flagged flaky: #776*"])
+    p.stdout.fnmatch_lines(["*XFAIL*test_bare*flagged flaky"])
+    r = results.read(str(out), signalled=False)
+    assert r.flagged == {
+        "test_m.py::test_str": 776,
+        "test_m.py::test_int": 12,
+        "test_m.py::test_bare": None,
+    }
+
+
+def test_the_mark_name_is_configured(pytester, tmp_path, monkeypatch):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    monkeypatch.setenv("FASTCI_FLAKY_MARK", "hold")
+    pytester.makepyfile(test_m=MARKED)
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist", "--markers")
+    p.stdout.fnmatch_lines(["@pytest.mark.hold: a known flaky test*"])
+    p = pytester.runpytest_subprocess(
+        "-p", "fastci.python.plugin", "-p", "no:xdist", "-k", "other or ok"
+    )
+    assert p.ret == 0
+    r = results.read(str(out), signalled=False)
+    assert r.flagged == {"test_m.py::test_other": 5}
+
+
+def test_skip_flagged_deselects_them(pytester, tmp_path, monkeypatch):
+    out = _flag(tmp_path, monkeypatch, {"test_m.py::test_ok": 3})
+    monkeypatch.setenv("FASTCI_SKIP_FLAGGED", "1")
+    pytester.makepyfile(test_m=MARKED)
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-p", "no:xdist")
+    p.assert_outcomes(failed=1, deselected=4)
+    r = results.read(out, signalled=False)
+    assert r.failed == ["test_m.py::test_other"] and r.flagged == {}
+
+
+def test_a_flagged_failure_under_xdist(pytester, tmp_path, monkeypatch):
+    pytest.importorskip("xdist")
+    out = _flag(tmp_path, monkeypatch, {"test_f.py::test_flaky": 31})
+    pytester.makepyfile(test_f="def test_flaky(): assert 0\ndef test_ok(): pass\n")
+    p = pytester.runpytest_subprocess("-p", "fastci.python.plugin", "-n", "2")
+    assert p.ret == 0
+    r = results.read(out, signalled=False)
+    assert r.flagged == {"test_f.py::test_flaky": 31} and r.failed == []
+    assert r.outcomes == {"test_f.py::test_flaky": "failed", "test_f.py::test_ok": "passed"}
+    assert r.explained
 
 
 def test_no_file_is_none(tmp_path):

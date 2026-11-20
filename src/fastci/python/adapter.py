@@ -21,6 +21,9 @@ OWN_VARS = (
     "FASTCI_CTX",
     "FASTCI_RESULTS",
     "FASTCI_DONE",
+    "FASTCI_FLAGGED",
+    "FASTCI_FLAKY_MARK",
+    "FASTCI_SKIP_FLAGGED",
 )
 # The directory holding the fastci package, so a project's own Python can import
 # the plugin without fastci being installed in that project's environment.
