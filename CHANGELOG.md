@@ -20,6 +20,13 @@
 - `[tool.fastci.flaky]`: `retries`, `machine-threshold`, `reach-share`,
   `forgive-reached`; a tier table takes `retries`. A value of the wrong type or
   out of range is a config error naming its key.
+- A forgiven test is flagged: as a GitHub issue labelled `flaky`, as a
+  `quarantine` mark fastci asks you to add, or both (`store`, `label`, `mark`,
+  `flagged`). A flagged test still runs, but its failure no longer blocks. Each
+  push to the default branch records the flagged and forgiven tests' outcomes,
+  once per run, in the `fastci-flaky` artifact; a history that exists but
+  cannot be fetched or read is left as it was. `retries = 0` turns flags off
+  on that tier, and a laptop reads the flags within 5 seconds.
 - The book: a chapter on flaky tests.
 
 ## 0.2.1
