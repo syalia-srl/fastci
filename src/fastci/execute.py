@@ -14,7 +14,15 @@ from collections.abc import Callable
 
 from . import fetch, results
 from .adapter import Adapter, Project
-from .flaky import UNJUDGEABLE, UNMAPPED, FlakyRun, Verdict, judge, strip_xdist
+from .flaky import (
+    UNJUDGEABLE,
+    UNJUDGEABLE_SINCE,
+    UNMAPPED,
+    FlakyRun,
+    Verdict,
+    judge,
+    strip_xdist,
+)
 from .local import killed_by_cap
 from .plan import Step
 from .tier import Context
@@ -81,13 +89,13 @@ def say_verdict(v: Verdict, store: str, since: str = "") -> None:
     elif v.kind == "machine":
         lines = ["failed, then passed; red: this looks like the machine, not the code"]
     elif v.kind == "reached":
-        if v.why in (UNJUDGEABLE, UNMAPPED):
+        if v.why in (UNJUDGEABLE, UNJUDGEABLE_SINCE, UNMAPPED):
             lines = [f"failed, then passed; {v.why}, so it counts as reached"]
         elif since:
             lines = [f"failed, then passed; the commits since {since[:7]} reach it through {v.why}"]
         else:
             lines = [f"failed, then passed; this change reaches it through {v.why}"]
-        what = "those commits" if since else "the change"
+        what = "those commits" if since or v.why == UNJUDGEABLE_SINCE else "the change"
         lines.append(f"red: check for a race in what {what} touched")
     else:
         if since:

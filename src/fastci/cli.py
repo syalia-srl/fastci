@@ -121,7 +121,7 @@ def _since_green(root, cfg, ctx, tm):
 
     from . import fetch
     from .execute import _token, repo_of, say
-    from .flaky import Reach, reach_of
+    from .flaky import UNJUDGEABLE_SINCE, Reach, reach_of
     from .python.pick import Picker, git, is_test_file
 
     repo, token = repo_of(root), _token(ctx)
@@ -150,7 +150,7 @@ def _since_green(root, cfg, ctx, tm):
                 why = f"no green run of {workflow} on {branch} before this commit in this clone"
     if why:
         say(f"{why}; every test counts as reached")
-        return Reach.everything()
+        return Reach.everything(UNJUDGEABLE_SINCE)
     say(f"judged against the last green run on {branch}, at {sha[:10]}")
     tests = {
         f for f in git(root, "diff", "--name-only", "--no-renames", sha).split() if is_test_file(f)

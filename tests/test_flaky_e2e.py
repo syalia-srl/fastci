@@ -212,6 +212,17 @@ def test_main_keeps_red_a_flake_the_map_does_not_know(on_main, sample, tmp_path,
     )
 
 
+def test_main_without_a_map_names_the_commits_since_green(on_main, sample, capsys):
+    (sample / ".fastci" / "map.json.gz").unlink()
+    on_main["marker"].unlink()
+    assert cli.main([]) == 1
+    err = capsys.readouterr().err
+    assert "no map to tell what changed since the last green run" in err
+    assert "fastci cannot tell what the commits since the last green run reach" in err
+    assert "red: check for a race in what those commits touched" in err
+    assert "this change" not in err and "the change" not in err
+
+
 @pytest.fixture
 def behind_green(on_main, sample):
     """HEAD changes the flaky test, and a later commit on main, with a green run,
@@ -246,6 +257,7 @@ def test_main_reaches_everything_when_no_green_run_is_behind_it(on_main, behind_
     err = capsys.readouterr().err
     assert "no green run of fastci.yml on main before this commit in this clone" in err
     assert "every test counts as reached" in err
+    assert "fastci cannot tell what the commits since the last green run reach" in err
 
 
 @pytest.mark.parametrize(
@@ -262,7 +274,11 @@ def test_main_judges_everything_reached_without_a_green_sha(on_main, capsys, gre
     assert cli.main([]) == 1
     err = capsys.readouterr().err
     assert f"fastci: {why}; every test counts as reached" in err
-    assert "fastci cannot tell what this change reaches" in err
+    assert (
+        "failed, then passed; fastci cannot tell what the commits since the last green run"
+        " reach, so it counts as reached" in err
+    )
+    assert "this change" not in err
 
 
 def test_done_tests_are_deselected_within_the_selection(pytester, monkeypatch):

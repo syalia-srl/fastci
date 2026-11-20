@@ -58,6 +58,7 @@ def reach_of(
 
 
 UNJUDGEABLE = "fastci cannot tell what this change reaches"
+UNJUDGEABLE_SINCE = "fastci cannot tell what the commits since the last green run reach"
 UNMAPPED = "the map does not know this test"
 
 
