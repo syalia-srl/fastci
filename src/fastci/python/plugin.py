@@ -104,7 +104,13 @@ MARKS = {
 COLLECT = os.environ.get("FASTCI_COLLECT")
 
 
+_worker = {"is": False}
+
+
 def pytest_configure(config):
+    # An xdist worker's config has workerinput; the environment variable also reaches
+    # any pytest a worker starts, which is not a worker.
+    _worker["is"] = hasattr(config, "workerinput")
     for name, text in MARKS.items():
         config.addinivalue_line("markers", f"{name}: {text}")
 
@@ -162,7 +168,7 @@ if RESULTS:
 
     def _write(event: dict) -> None:
         # Under xdist the controller sees every worker's events, and the crashes.
-        if os.environ.get("PYTEST_XDIST_WORKER"):
+        if _worker["is"]:
             return
         # One write per line in append mode, so lines never interleave.
         with open(RESULTS, "a", encoding="utf-8") as f:

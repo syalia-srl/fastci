@@ -84,6 +84,20 @@ def test_a_lost_xdist_worker_names_its_test(pytester, tmp_path, monkeypatch):
     assert out.read_text().count('"started"') == 2
 
 
+def test_a_pytest_started_inside_an_xdist_worker_writes_its_results(
+    pytester, tmp_path, monkeypatch
+):
+    # fastci's own suite runs under -n: the inner pytest inherits the worker's variable.
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    pytester.makepyfile(test_a="def test_ok(): pass\ndef test_bad(): assert 0\n")
+    pytester.runpytest_subprocess("-p", "fastci.python.plugin")
+    r = results.read(str(out), signalled=False)
+    assert r is not None and r.failed == ["test_a.py::test_bad"]
+    assert r.passed == {"test_a.py::test_ok"}
+
+
 def test_no_file_is_none(tmp_path):
     assert results.read(str(tmp_path / "missing"), signalled=False) is None
 
