@@ -1,3 +1,4 @@
+import re
 import textwrap
 
 import pytest
@@ -107,3 +108,48 @@ def test_bad_tier_config_is_named(tmp_path, text, match):
     write(tmp_path, "pyproject.toml", text)
     with pytest.raises(config.ConfigError, match=match):
         config.load(str(tmp_path))
+
+
+def load_text(tmp_path, body):
+    write(tmp_path, "pyproject.toml", '[project]\nname = "x"\n' + body)
+    return config.load(str(tmp_path))
+
+
+def test_flaky_defaults(tmp_path):
+    cfg = load_text(tmp_path, "")
+    assert cfg.flaky == config.FlakyConfig()
+    assert cfg.retries_for("pr") == 1
+
+
+def test_flaky_table_and_tier_retries(tmp_path):
+    cfg = load_text(
+        tmp_path,
+        """
+[tool.fastci.flaky]
+retries = 2
+machine-threshold = 4
+store = "both"
+reach-share = "10%"
+forgive-reached = true
+[tool.fastci.tiers.release]
+retries = 0
+""",
+    )
+    assert cfg.flaky.retries == 2 and cfg.flaky.machine_threshold == 4
+    assert cfg.flaky.store == "both" and cfg.flaky.reach_share == 0.1
+    assert cfg.flaky.forgive_reached is True
+    assert cfg.retries_for("release") == 0 and cfg.retries_for("main") == 2
+
+
+@pytest.mark.parametrize(
+    "body,msg",
+    [
+        ("[tool.fastci.flaky]\nretry = 1", "unknown key 'retry'"),
+        ('[tool.fastci.flaky]\nstore = "db"', 'store must be "issues", "marks" or "both"'),
+        ('[tool.fastci.flaky]\nflagged = "hide"', 'flagged must be "run" or "skip"'),
+        ("[tool.fastci.flaky]\nretries = -1", "retries must be 0 or more"),
+    ],
+)
+def test_flaky_rejects(tmp_path, body, msg):
+    with pytest.raises(config.ConfigError, match=re.escape(msg)):
+        load_text(tmp_path, body)
