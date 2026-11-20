@@ -951,25 +951,34 @@ def test_the_summary_has_one_row_per_judged_test_with_its_issue_link():
     text = ex.summary(verdicts, {"t::f": False}, {"t::a": 41, "t::f": 5}, "https://g/o/r/issues/")
     rows = [line for line in text.splitlines() if line.startswith("| `")]
     assert rows == [
-        "| `t::a` | failed, then passed; this change does not reach it"
+        "| `t::a` | green | failed, then passed; this change does not reach it"
         " | [#41](https://g/o/r/issues/41) |",
-        "| `t::b\\|c` | failed, then failed again on retry | |",
-        "| `t::d` | failed, then passed; this change reaches it through src/d.py | |",
-        "| `t::e` | failed, then passed; red: this looks like the machine, not the code | |",
-        "| `t::g` | killed its process: a fault in the code or the machine, not a flake | |",
-        "| `t::f` | flagged, passed | [#5](https://g/o/r/issues/5) |",
+        "| `t::b\\|c` | red | failed, then failed again on retry | |",
+        "| `t::d` | red | failed, then passed; this change reaches it through src/d.py | |",
+        "| `t::e` | red | failed, then passed; red: this looks like the machine, not the code | |",
+        "| `t::g` | red | killed its process: a fault in the code or the machine, not a flake | |",
+        "| `t::f` | green | flagged, passed | [#5](https://g/o/r/issues/5) |",
     ]
-    assert "| test | verdict | issue |" in text.splitlines()
+    assert "| test | result | verdict | issue |" in text.splitlines()
+
+
+@pytest.mark.parametrize(
+    "id,cell",
+    [("t::a[`x`]", "`` t::a[`x`] ``"), ("t::a[``]", "``` t::a[``] ```"), ("t::a", "`t::a`")],
+)
+def test_a_backtick_in_a_node_id_keeps_its_code_span(id, cell):
+    text = ex.summary([Verdict(id, "failed", True)], {}, {}, "u/")
+    assert f"| {cell} | red |" in text
 
 
 def test_on_main_the_summary_says_what_main_prints():
     verdicts = [Verdict("t::a", "flaky", False), Verdict("t::d", "reached", True, "src/d.py")]
     text = ex.summary(verdicts, {}, {}, "u/", since="0123456789")
     forgiven = "failed, then passed; no commit since the last green run reaches it"
-    assert f"| `t::a` | {forgiven} | |" in text
+    assert f"| `t::a` | green | {forgiven} | |" in text
     assert (
-        "| `t::d` | failed, then passed; the commits since 0123456 reach it through src/d.py | |"
-        in text
+        "| `t::d` | red | failed, then passed; the commits since 0123456 reach it through"
+        " src/d.py | |" in text
     )
 
 
@@ -985,10 +994,10 @@ def test_every_run_in_ci_appends_the_table_and_the_flag_lines(monkeypatch, tmp_p
     text = summary.read_text()
     assert text.startswith("before\n")
     assert (
-        "| `t::a` | failed, then passed; this change does not reach it"
+        "| `t::a` | green | failed, then passed; this change does not reach it"
         " | [#41](https://github.com/o/r/issues/41) |" in text
     )
-    assert "| `t::f` | flagged, failed | [#5](https://github.com/o/r/issues/5) |" in text
+    assert "| `t::f` | green | flagged, failed | [#5](https://github.com/o/r/issues/5) |" in text
     assert "- t::a: flagged as flaky: #41 (new)" in text
 
 

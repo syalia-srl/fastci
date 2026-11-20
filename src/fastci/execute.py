@@ -106,19 +106,26 @@ def summary(
     url: str,
     since: str = "",
 ) -> str:
-    """The job summary's table: one row per judged test, with the first line of its
-    verdict as the run prints it, then one per flagged test that ran
+    """The job summary's table: one row per judged test, red or green and the first line
+    of its verdict as the run prints it, then one per flagged test that ran
     (``flagged_outcomes``: whether it failed). ``url`` + number links an issue."""
 
-    def row(id: str, verdict: str) -> str:
+    def row(id: str, blocks: bool, verdict: str) -> str:
         n = issues_by_id.get(id)
         test = id.replace("|", "\\|")  # a | in a node id would end the cell
-        return f"| `{test}` | {verdict} | {f'[#{n}]({url}{n}) ' if n else ''}|"
+        # A fence longer than any run of backticks in the id, which may then not touch it.
+        ticks = max(map(len, re.findall("`+", test)), default=0)
+        fence, pad = "`" * (ticks + 1), " " if ticks else ""
+        return (
+            f"| {fence}{pad}{test}{pad}{fence} | {'red' if blocks else 'green'} | {verdict}"
+            f" | {f'[#{n}]({url}{n}) ' if n else ''}|"
+        )
 
-    rows = [row(v.id, verdict_lines(v, since)[0]) for v in verdicts]
+    rows = [row(v.id, v.blocks, verdict_lines(v, since)[0]) for v in verdicts]
     for id, failed in sorted(flagged_outcomes.items()):
-        rows.append(row(id, f"flagged, {'failed' if failed else 'passed'}"))
-    return "\n".join(["| test | verdict | issue |", "|---|---|---|", *rows]) + "\n"
+        rows.append(row(id, False, f"flagged, {'failed' if failed else 'passed'}"))
+    head = ["| test | result | verdict | issue |", "|---|---|---|---|"]
+    return "\n".join([*head, *rows]) + "\n"
 
 
 INDENT = "\n" + " " * 10
