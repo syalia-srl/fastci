@@ -11,6 +11,8 @@ serves both commands:
   come from coverage itself (``--cov-context=test``).
 - ``FASTCI_SELECT=<file>`` (set by ``fastci map run``): keep only the collected
   tests whose node id, or whose file, is listed in that file.
+- ``FASTCI_RESULTS=<file>``: append one JSON line per test event to that file,
+  read back by ``fastci.results``.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import sys
 
 RECORD = os.environ.get("FASTCI_RECORD")
 SELECT = os.environ.get("FASTCI_SELECT")
+RESULTS = os.environ.get("FASTCI_RESULTS")
 ROOT = os.path.realpath(os.environ.get("FASTCI_ROOT", os.getcwd()))
 
 _state: dict = {"test": None, "busy": False}
@@ -133,3 +136,41 @@ if SELECT:
         if drop:
             config.hook.pytest_deselected(items=drop)
         items[:] = [item for _, item in keep]
+
+
+if RESULTS:
+    import pytest
+
+    def _write(event: dict) -> None:
+        # Under xdist the controller sees every worker's events, and the crashes.
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return
+        # One write per line in append mode, so lines never interleave.
+        with open(RESULTS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def pytest_runtest_logstart(nodeid, location):
+        _write({"e": "started", "id": nodeid})
+
+    def pytest_runtest_logreport(report):
+        if report.outcome != "failed" and report.when != "call":
+            return
+        crash = getattr(report.longrepr, "reprcrash", None)
+        error = crash.message.splitlines()[0] if crash and crash.message else ""
+        _write(
+            {
+                "e": "outcome",
+                "id": report.nodeid,
+                "when": report.when,
+                "outcome": report.outcome,
+                "error": error,
+                "dur": report.duration,
+            }
+        )
+
+    def pytest_runtest_logfinish(nodeid, location):
+        _write({"e": "finished", "id": nodeid})
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_handlecrashitem(crashitem, report, sched):
+        _write({"e": "crashed", "id": crashitem})
