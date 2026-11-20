@@ -987,3 +987,28 @@ def test_no_summary_without_the_variable_or_anything_to_say(monkeypatch, tmp_pat
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     run_flagged(flagger(tmp_path), FakeAdapter(script=[(0, events(["b"]))]))
     assert not summary.exists()
+
+
+@pytest.mark.parametrize("issue", [issues.Issue(18, False), None], ids=["reopened", "new"])
+def test_on_main_a_flake_again_restarts_the_landing(monkeypatch, tmp_path, issue):
+    # A flag closed by hand keeps no landing: the reopened flag needs a new reaching change.
+    FakeIssues(monkeypatch, {"t::a": issue} if issue else {})
+    in_ci(monkeypatch, "refs/heads/main")
+    old = {"main": [0] * 19, "landed": True, "clean": 19, "landed_sha": LANDED}
+    history_artifact(monkeypatch, {"version": 1, "tests": {"t::a": old}})
+    run_flagged(flagger(tmp_path, tier="main"))
+    e = History.load(tmp_path / HISTORY).tests["t::a"]
+    assert (e.landed, e.clean, e.landed_sha) == (False, 0, None)
+
+
+def test_on_main_a_closed_issue_drops_the_landing(monkeypatch, tmp_path):
+    # Closed by hand, then reopened by a pull request: main must not resume the old streak.
+    gh = FakeIssues(monkeypatch, {"t::f": issues.Issue(5, False)})
+    in_ci(monkeypatch, "refs/heads/main")
+    old = {"main": [0] * 19, "landed": True, "clean": 19, "landed_sha": LANDED}
+    history_artifact(monkeypatch, {"version": 1, "tests": {"t::f": old}})
+    f = flagger(tmp_path, tier="main")
+    a = FakeAdapter(script=[(0, events(["b"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=FlakyRun(f.cfg, 1, NOTHING, f)) == 0
+    e = History.load(tmp_path / HISTORY).tests["t::f"]
+    assert (e.landed, e.clean, e.landed_sha) == (False, 0, None) and gh.writes() == []

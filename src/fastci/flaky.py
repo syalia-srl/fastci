@@ -151,6 +151,11 @@ class Entry:
     landed: bool = False  # a change that reaches the test has landed on main
     clean: int = 0  # runs on main without a failure since it landed
     landed_sha: str | None = None  # the commit of the main run whose reach first held it
+    # landed, clean and landed_sha restart when the test flakes again or its issue is
+    # closed or reopened: a flag that comes back needs a new reaching change.
+
+    def restart(self) -> None:
+        self.landed, self.clean, self.landed_sha = False, 0, None
 
 
 @dataclass

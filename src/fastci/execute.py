@@ -419,6 +419,10 @@ class Flagger:
         """After the last stage: on main, unflag what left the list and save the
         history; in CI, append the table and the flag lines to the job summary."""
         if self.history is not None:
+            for id, e in self.history.tests.items():
+                issue = (self.issues or {}).get(id)
+                if id not in self.ran and issue is not None and not issue.open:
+                    e.restart()  # closed by hand: a reopen must not resume the streak
             for id in sorted(self.ran):
                 self._unflag(id, reach.lands(id))
             self.history.save(os.path.join(self.root, HISTORY))
@@ -470,7 +474,7 @@ class Flagger:
                 self._say(f"{id}: unflagged after {entry.clean} clean runs on main; {why}")
         if self.cfg.store in ("marks", "both"):
             self._say(f"the mark on {id} can go")
-        entry.landed, entry.clean, entry.landed_sha = False, 0, None
+        entry.restart()
 
     def _record(self, flaky: list[str], res: results.Results) -> set[str]:
         """Add the flagged tests' outcomes and the flakes to the history: the
@@ -486,6 +490,7 @@ class Flagger:
                     changed.add(id)
         for id in flaky:
             self._add(id, True, res, date)
+            self.history.tests[id].restart()  # flagged again: an old landing no longer counts
         return changed
 
     def _add(self, id: str, failed: bool, res: results.Results, date: str) -> None:
