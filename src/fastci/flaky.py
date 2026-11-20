@@ -158,6 +158,19 @@ class Entry:
         self.landed, self.clean, self.landed_sha = False, 0, None
 
 
+def _typed(e: Entry) -> bool:
+    """Whether every field holds its type; bool is not an int here, nor an int a bool."""
+    return (
+        isinstance(e.main, list)
+        and all(type(x) is int and x in (0, 1) for x in e.main)
+        and all(w is None or isinstance(w, dict) for w in (e.first, e.last_failure))
+        and (e.issue is None or type(e.issue) is int)
+        and type(e.landed) is bool
+        and type(e.clean) is int
+        and (e.landed_sha is None or isinstance(e.landed_sha, str))
+    )
+
+
 @dataclass
 class History:
     """``.fastci/flaky.json``: the outcomes on main of the flagged tests and of those
@@ -168,7 +181,8 @@ class History:
     @classmethod
     def read(cls, path: str | Path) -> History:
         """The history in ``path``; OSError or ValueError when it is not one. An entry
-        it cannot read is left out, and a key it does not know is ignored."""
+        it cannot read, or with a field of the wrong type, is left out, and a key it
+        does not know is ignored."""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("tests"), dict):
             raise ValueError(f"{path} is not a flaky history")
@@ -177,7 +191,7 @@ class History:
         for t, e in data["tests"].items():
             if isinstance(e, dict):
                 entry = Entry(**{k: v for k, v in e.items() if k in known})
-                if isinstance(entry.main, list) and all(x in (0, 1) for x in entry.main):
+                if _typed(entry):
                     tests[t] = entry
         return cls(tests)
 

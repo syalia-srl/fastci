@@ -161,6 +161,32 @@ def test_history_keeps_the_entries_it_can_read_and_ignores_unknown_keys(tmp_path
     assert History.load(p) == h
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"clean": "3"},
+        {"clean": True},
+        {"clean": 2.0},
+        {"landed": 1},
+        {"landed_sha": 7},
+        {"main": [0, True]},
+        {"main": [0, 1.0]},
+        {"main": "01"},
+        {"issue": "18"},
+        {"issue": True},
+        {"first": "abc"},
+        {"last_failure": []},
+    ],
+)
+def test_history_drops_an_entry_with_a_field_of_the_wrong_type(tmp_path, bad):
+    # A hand-edited artifact must not crash the run after its stages and lose the summary.
+    p = tmp_path / "flaky.json"
+    good = {"main": [0, 1], "clean": 2, "landed": True, "landed_sha": "abc", "issue": 4}
+    tests = {"t.py::bad": {**good, **bad}, "t.py::good": good}
+    p.write_text(json.dumps({"version": 1, "tests": tests}))
+    assert set(History.read(p).tests) == {"t.py::good"}
+
+
 @pytest.mark.parametrize("content", ["{not json", '{"version": 1, "tests": 3}', "[]"])
 def test_history_read_refuses_a_file_that_is_not_one(tmp_path, content):
     p = tmp_path / "flaky.json"
