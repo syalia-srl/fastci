@@ -33,6 +33,9 @@ def _pick(args):
         print(f"fastci: no map at {args.map}; every test runs", file=sys.stderr)
         return None, None
     tm = TestMap.load(args.map)
+    if not tm.tests:
+        print(f"fastci: the map at {args.map} has no tests; every test runs", file=sys.stderr)
+        return None, None
     base = git(root, "merge-base", args.base, args.head or "HEAD").strip() or args.base
     p = Picker(tm, root, load(root).tests).pick(base, args.head)
     if p.full:
@@ -197,6 +200,12 @@ def _setup(args) -> int:
     return 0
 
 
+def _version() -> str:
+    from . import __version__
+
+    return __version__
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     own, rest = _split(argv)
@@ -204,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tier", help="run as this tier (local, pr, main, release or your own)")
     parser.add_argument("--base", help="what the change is compared to, in a tier that diffs")
     parser.add_argument("--map", default=DEFAULT_MAP)
+    parser.add_argument("--version", action="version", version=f"fastci {_version()}")
     top = parser.add_subparsers(dest="top")
     top.add_parser("fix", help="rewrite what the checks can fix (format, lint), then check")
     mp = top.add_parser("map", help="record, read and fetch the map of what each test runs")
@@ -276,13 +286,13 @@ def _dispatch(args, parser, rest) -> int:
         from .python.record import default_sources, record
 
         root = _root()
-        if args.source:
-            return record(rest, args.out, args.source, root)
         adapter = PythonAdapter()
         projects = adapter.detect(root)
         if not projects:
-            return record(rest, args.out, default_sources(root), root)
-        return adapter.record(projects[0], root, os.path.abspath(args.out), rest)
+            return record(rest, args.out, args.source or default_sources(root), root)
+        # Through the adapter, so pytest runs in the project's environment, not fastci's.
+        out = os.path.abspath(args.out)
+        return adapter.record(projects[0], root, out, rest, sources=args.source)
 
     if args.cmd == "fetch":
         from .fetch import fetch
