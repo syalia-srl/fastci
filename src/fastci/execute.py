@@ -295,6 +295,7 @@ class Flagger:
         self.judged: list[Verdict] = []
         self.ran: dict[str, bool] = {}  # the flagged tests that ran: failed in any stage
         self.numbers: dict[str, int] = {}  # the issue each flagged test's mark names
+        self.marked: set[str] = set()  # the flagged tests that ran with the mark on them
         self.laptop = ctx.spec.capped
         env = os.environ
         ref = env.get("GITHUB_REF", "")
@@ -384,6 +385,8 @@ class Flagger:
                 self.ran[id] = self.ran.get(id, False) or res.outcomes[id] == "failed"
                 if number:
                     self.numbers[id] = number
+                if id in res.marked:
+                    self.marked.add(id)
         flaky = [v.id for v in verdicts if v.kind == "flaky"]
         changed = self._record(flaky, res) if self.history is not None else set()
         notes: dict[str, list[str]] = {}
@@ -447,6 +450,8 @@ class Flagger:
         if not due:
             return
         entry = self.history.tests[id]
+        # An open issue, read under "issues" or "both", and the mark flag a test in any
+        # store: fastci closes the one and says the other can go.
         if self.cfg.store in ("issues", "both"):
             if self.issues is None:
                 self._say(f"could not unflag {id}: the flaky issues could not be read")
@@ -469,11 +474,8 @@ class Flagger:
                 except Exception as e:
                     self._say(f"could not comment on #{issue.number}: {e}")
                 self._say(f"{id}: unflagged, #{issue.number} closed")
-            else:
-                why = f"#{issue.number} is already closed" if issue else "it has no issue"
-                self._say(f"{id}: unflagged after {entry.clean} clean runs on main; {why}")
-        if self.cfg.store in ("marks", "both"):
-            self._say(f"the mark on {id} can go")
+        if id in self.marked:
+            self._say(f"the mark @pytest.mark.{self.cfg.mark} on {id} can go")
         entry.restart()
 
     def _record(self, flaky: list[str], res: results.Results) -> set[str]:

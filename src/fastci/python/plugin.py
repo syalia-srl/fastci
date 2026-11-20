@@ -219,6 +219,8 @@ def pytest_runtest_makereport(item, call):
     if flagged:
         # Read by the results line, which under xdist runs on the controller.
         report.fastci_flagged = True if number is None else number
+        if FLAKY_MARK and item.get_closest_marker(FLAKY_MARK) is not None:
+            report.fastci_marked = True  # leaving the list, the mark must go by hand
         if report.failed:
             report.fastci_outcome = "failed"
             report.outcome = "skipped"
@@ -255,6 +257,8 @@ if RESULTS:
         }
         if hasattr(report, "fastci_flagged"):
             event["flagged"] = report.fastci_flagged
+        if hasattr(report, "fastci_marked"):
+            event["marked"] = True
         _write(event)
 
     def pytest_runtest_logfinish(nodeid, location):

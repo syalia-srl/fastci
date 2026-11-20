@@ -577,10 +577,10 @@ def test_on_main_a_flake_opens_its_issue_and_writes_the_history(monkeypatch, tmp
     assert edited[:2] == ("edit", 5) and "| main, last 3 | 3 | 1 | 33% |" in edited[2]
 
 
-def flagged_outcome(t, result, number):
+def flagged_outcome(t, result, number, marked=False):
     return [
         {"e": "started", "id": t},
-        {**outcome(t, result), "flagged": number},
+        {**outcome(t, result), "flagged": number, **({"marked": True} if marked else {})},
         {"e": "finished", "id": t},
     ]
 
@@ -788,13 +788,16 @@ OPEN_5 = issues.Issue(5, True)
 LANDED = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 
 
-def run_on_main(monkeypatch, tmp_path, entry, result="passed", reach=NOTHING, issue=OPEN_5, **cfg):
-    """One run on main where flagged t::f (#5) has ``result``, with ``entry`` its history."""
+def run_on_main(
+    monkeypatch, tmp_path, entry, result="passed", reach=NOTHING, issue=OPEN_5, marked=False, **cfg
+):
+    """One run on main where flagged t::f (#5) has ``result``, with ``entry`` its history;
+    ``marked``: the mark flags it."""
     gh = FakeIssues(monkeypatch, {"t::f": issue} if issue else {})
     in_ci(monkeypatch, "refs/heads/main")
     history_artifact(monkeypatch, {"version": 1, "tests": {"t::f": entry}})
     f = flagger(tmp_path, tier="main", **cfg)
-    a = FakeAdapter(script=[(0, [*events(["b"]), *flagged_outcome("t::f", result, 5)])])
+    a = FakeAdapter(script=[(0, [*events(["b"]), *flagged_outcome("t::f", result, 5, marked)])])
     code = run([tests_step()], a, fail_fast_tests=False, flaky=FlakyRun(f.cfg, 1, reach, f))
     return code, gh, f, History.load(tmp_path / HISTORY).tests["t::f"]
 
@@ -827,17 +830,28 @@ def test_the_close_comment_leaves_out_a_landing_commit_it_does_not_know(monkeypa
     )
 
 
-@pytest.mark.parametrize(
-    "issue,why", [(None, "it has no issue"), (issues.Issue(5, False), "#5 is already closed")]
-)
-def test_a_due_test_without_an_open_issue_says_its_flag_ends(
-    monkeypatch, tmp_path, capsys, issue, why
+MARK_GOES = "the mark @pytest.mark.quarantine on t::f can go"
+DUE = {"main": [0] * 19, "landed": True, "clean": 19}
+
+
+@pytest.mark.parametrize("store", ["issues", "marks", "both"])
+@pytest.mark.parametrize("issue", [None, issues.Issue(5, False)], ids=["no-issue", "closed"])
+def test_a_due_test_flagged_by_its_mark_is_told_the_mark_can_go(
+    monkeypatch, tmp_path, capsys, store, issue
 ):
-    entry = {"main": [0] * 19, "landed": True, "clean": 19}
-    _, gh, f, e = run_on_main(monkeypatch, tmp_path, entry, issue=issue)
-    line = f"t::f: unflagged after 20 clean runs on main; {why}"
-    assert line in f.lines and f"fastci: {line}" in capsys.readouterr().err
+    _, gh, f, e = run_on_main(monkeypatch, tmp_path, DUE, issue=issue, marked=True, store=store)
+    assert MARK_GOES in f.lines and f"fastci: {MARK_GOES}" in capsys.readouterr().err
+    assert not any("unflagged" in line for line in f.lines)
     assert ("set_open", 5, False) not in gh.writes() and (e.landed, e.clean) == (False, 0)
+
+
+@pytest.mark.parametrize("store", ["issues", "both"])
+@pytest.mark.parametrize("marked", [False, True])
+def test_a_due_test_flagged_by_its_issue_has_it_closed(monkeypatch, tmp_path, store, marked):
+    _, gh, f, _ = run_on_main(monkeypatch, tmp_path, DUE, marked=marked, store=store)
+    assert ("set_open", 5, False) in gh.writes() and "t::f: unflagged, #5 closed" in f.lines
+    assert any("can go" in line for line in f.lines) is marked
+    assert (MARK_GOES in f.lines) is marked
 
 
 def test_on_main_a_reaching_change_lands_and_counts(monkeypatch, tmp_path):
@@ -884,10 +898,8 @@ def test_unflag_after_zero_never_closes(monkeypatch, tmp_path):
 
 
 def test_with_marks_the_summary_says_the_mark_can_go(monkeypatch, tmp_path, capsys):
-    entry = {"main": [0] * 19, "landed": True, "clean": 19}
-    _, gh, f, e = run_on_main(monkeypatch, tmp_path, entry, store="marks")
-    assert "the mark on t::f can go" in f.lines
-    assert "fastci: the mark on t::f can go" in capsys.readouterr().err
+    _, gh, f, e = run_on_main(monkeypatch, tmp_path, DUE, marked=True, store="marks")
+    assert MARK_GOES in f.lines
     assert gh.writes() == [] and (e.landed, e.clean) == (False, 0)
 
 
