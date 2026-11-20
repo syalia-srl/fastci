@@ -131,7 +131,21 @@ def test_no_file_is_none(tmp_path):
 
 @pytest.mark.parametrize(
     "code,yes",
-    [(-11, True), (139, True), (135, True), (137, True), (1, False), (2, False), (130, False)],
+    [
+        (-11, True),
+        (139, True),
+        (135, True),
+        (137, True),
+        (-6, True),
+        (-4, True),
+        (136, True),
+        (-15, False),
+        (-2, False),
+        (143, False),
+        (1, False),
+        (2, False),
+        (130, False),
+    ],
 )
 def test_signalled(code, yes):
     assert results.signalled(code) is yes

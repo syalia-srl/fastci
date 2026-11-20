@@ -276,6 +276,13 @@ def test_a_crashed_test_is_red_and_not_retried(capsys):
     assert "a\n          killed its process with SIGBUS" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("code", [-15, -2])
+def test_a_run_stopped_by_sigterm_or_sigint_blames_no_test(capsys, code):
+    a = FakeAdapter(script=[(code, events(["b"], hung=["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == code
+    assert "killed its process" not in capsys.readouterr().err
+
+
 def test_retries_zero_is_todays_behaviour(capsys):
     a = FakeAdapter(script=[(1, events([], ["a"]))])
     assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky(retries=0)) == 1

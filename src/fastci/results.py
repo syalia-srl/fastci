@@ -13,7 +13,15 @@ import os
 import signal
 from dataclasses import dataclass, field
 
-FATAL = {signal.SIGABRT, signal.SIGBUS, signal.SIGSEGV, signal.SIGKILL}
+# A fault in the code or the machine; SIGTERM and SIGINT are someone stopping the run.
+FATAL = {
+    signal.SIGABRT,
+    signal.SIGBUS,
+    signal.SIGSEGV,
+    signal.SIGKILL,
+    signal.SIGILL,
+    signal.SIGFPE,
+}
 
 
 @dataclass
@@ -36,7 +44,7 @@ class Results:
 
 def signalled(code: int) -> bool:
     """Whether a process exit code says it died by a signal that marks a crash."""
-    return code < 0 or code - 128 in FATAL
+    return -code in FATAL or code - 128 in FATAL
 
 
 def read(path: str, signalled: bool) -> Results | None:
