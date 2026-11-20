@@ -22,7 +22,7 @@ saves time: recall comes before speed.
 | What | Where |
 |---|---|
 | Why it is built this way, and what it will not do | `DESIGN.md` |
-| What it is and how to use it | `README.md` |
+| What it is and how to use it | the book, `docs/chapters/` (`make docs` renders it) |
 | What changed in each version | `CHANGELOG.md` |
 
 ## Working here
