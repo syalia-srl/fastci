@@ -1,0 +1,24 @@
+rules:
+  - name: "every public class is named in the book"
+    extract:
+      file: "src/fastci/**/*.py"
+      regex: '^class ([A-Za-z]\w*)'
+    require:
+      in: "docs/chapters/*.md"
+      as: word
+
+  - name: "every command is named in the book"
+    extract:
+      file: "src/fastci/cli.py"
+      regex: 'add_parser\(\s*"([a-z-]+)"'
+    require:
+      in: "docs/chapters/*.md"
+      as: word
+
+  - name: "every tier key is explained in the book"
+    extract:
+      file: "src/fastci/config.py"
+      regex: '"(when|tests|without-map|marks|fail-fast|capped)"'
+    require:
+      in: "docs/chapters/03-tiers.md"
+      as: word

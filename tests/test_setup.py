@@ -36,7 +36,8 @@ def test_full_proposes_browser_mark_and_replacement(tmp_path):
 
 def test_workflow_pins_the_installed_version(tmp_path):
     [wf] = [c for c in setup.propose(str(copy(tmp_path, "setup-bare"))) if c.kind == "add-file"]
-    assert f"uvx fastci@{fastci.__version__}" in wf.after
+    src = f"uvx --from git+https://github.com/syalia-srl/fastci@v{fastci.__version__} fastci"
+    assert src in wf.after
     assert "fetch-depth: 0" in wf.after and "name: fastci" in wf.after
 
 

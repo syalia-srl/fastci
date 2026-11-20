@@ -1,0 +1,42 @@
+name: docs
+
+# The book renders with every block executed, names every class and command
+# (rift), and publishes to GitHub Pages, with its PDF, on every push to main.
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+  workflow_dispatch:
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0
+      - run: uv sync --locked --group docs
+      - run: make docs-check
+      - run: uv run --group docs scriptorium render docs/scriptorium.yaml --only print && cp docs/print.pdf docs/site/fastci.pdf
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: docs/site
+
+  publish:
+    needs: book
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
