@@ -56,26 +56,23 @@ def newest_artifact(
     return max(arts, key=lambda a: a["created_at"]) if arts else None
 
 
-def last_green_sha(
+def green_shas(
     repo: str,
     branch: str,
-    workflow_path: str,
+    workflow: str,
     token: str,
     exclude_run: str | None,
     timeout: float = 60,
-) -> str | None:
-    """The commit of the newest successful push run of ``workflow_path`` on ``branch``,
-    leaving out the run ``exclude_run`` (the one asking)."""
+) -> list[str]:
+    """The commits of the successful push runs of ``workflow`` (its file name) on
+    ``branch``, newest first, leaving out the run ``exclude_run`` (the one asking)."""
     url = (
-        f"{API}/repos/{repo}/actions/runs?branch={urllib.parse.quote(branch)}"
-        "&event=push&status=success&per_page=50"
+        f"{API}/repos/{repo}/actions/workflows/{urllib.parse.quote(workflow)}/runs"
+        f"?branch={urllib.parse.quote(branch)}&event=push&status=success&per_page=50"
     )
     with _get(url, token, timeout=timeout) as r:
         runs = json.load(r)["workflow_runs"]
-    for run in runs:
-        if run.get("path") == workflow_path and str(run["id"]) != exclude_run:
-            return run["head_sha"]
-    return None
+    return [run["head_sha"] for run in runs if str(run["id"]) != exclude_run]
 
 
 def _download(url: str, token: str, out: str) -> None:

@@ -122,7 +122,8 @@ def test_a_forgiven_flake_does_not_hide_a_collection_error(sample, forgiven):
 @pytest.fixture
 def on_main(sample, tmp_path, monkeypatch):
     """The sample with a recorded map and the flaky test, run as main in CI; set
-    ``green`` to the sha the last green run was at."""
+    ``green`` to the sha the last green run was at, or to the green runs' shas,
+    newest first."""
     marker = tmp_path / "marker"
     marker.touch()
     (sample / "tests" / "test_once.py").write_text(FLAKY.format(marker=str(marker)))
@@ -143,11 +144,14 @@ def on_main(sample, tmp_path, monkeypatch):
     monkeypatch.chdir(sample)
     state = {"green": None, "asked": []}
 
-    def last_green(repo, branch, path, token, exclude_run, timeout=60):
-        state["asked"].append((repo, branch, path, exclude_run))
-        return state["green"]
+    def green_shas(repo, branch, workflow, token, exclude_run, timeout=60):
+        state["asked"].append((repo, branch, workflow, exclude_run))
+        green = state["green"]
+        if isinstance(green, Exception):
+            raise green
+        return green if isinstance(green, list) else [green] if green else []
 
-    monkeypatch.setattr(fetch, "last_green_sha", last_green)
+    monkeypatch.setattr(fetch, "green_shas", green_shas)
     state["head"] = lambda: sh(sample, "git", "rev-parse", "HEAD").strip()
     state["marker"] = marker
     return state
@@ -161,7 +165,7 @@ def test_main_keeps_a_flake_red_when_a_commit_since_green_reaches_it(on_main, sa
     on_main["marker"].unlink()
     assert cli.main([]) == 1
     err = capsys.readouterr().err
-    assert on_main["asked"] == [("o/r", "main", ".github/workflows/fastci.yml", "9")]
+    assert on_main["asked"] == [("o/r", "main", "fastci.yml", "9")]
     green = on_main["green"][:7]
     assert f"the commits since {green} reach it through tests/test_once.py" in err
     assert "red: check for a race in what those commits touched" in err
@@ -188,11 +192,48 @@ def test_main_reaches_every_test_when_a_full_path_changed(on_main, sample, capsy
     assert f"the commits since {green} reach it through pyproject.toml" in capsys.readouterr().err
 
 
+@pytest.fixture
+def behind_green(on_main, sample):
+    """HEAD changes the flaky test, and a later commit on main, with a green run,
+    changes only calc.py; the run judges HEAD, checked out behind it."""
+    start = on_main["head"]()
+    once = sample / "tests" / "test_once.py"
+    once.write_text(once.read_text().replace("fails until", "fails once until"))
+    commit(sample)
+    head = on_main["head"]()
+    calc = sample / "src" / "sample" / "calc.py"
+    calc.write_text(calc.read_text().replace("return a + b", "return b + a"))
+    commit(sample)
+    later = on_main["head"]()
+    sh(sample, "git", "checkout", "-q", head)
+    on_main["marker"].unlink()
+    return start, later
+
+
+def test_main_skips_a_green_run_newer_than_the_commit_it_judges(on_main, behind_green, capsys):
+    start, later = behind_green
+    on_main["green"] = [later, start]
+    assert cli.main([]) == 1
+    err = capsys.readouterr().err
+    assert f"judged against the last green run on main, at {start[:10]}" in err
+    assert f"the commits since {start[:7]} reach it through tests/test_once.py" in err
+
+
+def test_main_reaches_everything_when_no_green_run_is_behind_it(on_main, behind_green, capsys):
+    _, later = behind_green
+    on_main["green"] = [later]
+    assert cli.main([]) == 1
+    err = capsys.readouterr().err
+    assert "no green run of fastci.yml on main before this commit in this clone" in err
+    assert "every test counts as reached" in err
+
+
 @pytest.mark.parametrize(
     "green,why",
     [
-        (None, "no green run of .github/workflows/fastci.yml on main"),
-        ("0" * 40, "git does not have 0000000000, the last green run on main"),
+        (None, "no green run of fastci.yml on main"),
+        ("0" * 40, "no green run of fastci.yml on main before this commit in this clone"),
+        (OSError("offline"), "could not find the last green run (offline)"),
     ],
 )
 def test_main_judges_everything_reached_without_a_green_sha(on_main, capsys, green, why):

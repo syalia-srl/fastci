@@ -81,20 +81,19 @@ def _runs(monkeypatch, runs, seen=None):
     monkeypatch.setattr(fetch, "_get", get)
 
 
-def test_last_green_sha_skips_other_workflows_and_this_run(monkeypatch):
+def test_green_shas_asks_for_this_workflows_runs_and_skips_this_run(monkeypatch):
     runs = [
-        {"id": 9, "path": ".github/workflows/fastci.yml", "head_sha": "this"},
-        {"id": 8, "path": ".github/workflows/docs.yml", "head_sha": "docs"},
-        {"id": 7, "path": ".github/workflows/fastci.yml", "head_sha": "green"},
-        {"id": 6, "path": ".github/workflows/fastci.yml", "head_sha": "older"},
+        {"id": 9, "head_sha": "this"},
+        {"id": 7, "head_sha": "green"},
+        {"id": 6, "head_sha": "older"},
     ]
     seen = []
     _runs(monkeypatch, runs, seen)
-    sha = fetch.last_green_sha("o/r", "main", ".github/workflows/fastci.yml", "t", "9")
-    assert sha == "green"
+    assert fetch.green_shas("o/r", "main", "fastci.yml", "t", "9") == ["green", "older"]
+    assert seen[0].startswith(f"{fetch.API}/repos/o/r/actions/workflows/fastci.yml/runs?")
     assert "branch=main" in seen[0] and "status=success" in seen[0] and "event=push" in seen[0]
 
 
-def test_last_green_sha_none_without_runs(monkeypatch):
+def test_green_shas_empty_without_runs(monkeypatch):
     _runs(monkeypatch, [])
-    assert fetch.last_green_sha("o/r", "main", ".github/workflows/fastci.yml", "t", None) is None
+    assert fetch.green_shas("o/r", "main", "fastci.yml", "t", None) == []

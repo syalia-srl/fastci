@@ -125,7 +125,7 @@ def _since_green(root, cfg, ctx, tm):
     repo, token = repo_of(root), _token(ctx)
     branch = os.environ.get("GITHUB_REF_NAME") or cfg.default_branch
     ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
-    workflow = ref.removeprefix(f"{repo}/").split("@")[0]
+    workflow = os.path.basename(ref.split("@")[0])
     sha = why = None
     if tm is None:
         why = "no map to tell what changed since the last green run"
@@ -135,16 +135,17 @@ def _since_green(root, cfg, ctx, tm):
         why = "no GITHUB_WORKFLOW_REF to find the last green run"
     else:
         try:
-            sha = fetch.last_green_sha(
-                repo, branch, workflow, token, os.environ.get("GITHUB_RUN_ID")
-            )
+            shas = fetch.green_shas(repo, branch, workflow, token, os.environ.get("GITHUB_RUN_ID"))
         except Exception as e:
             why = f"could not find the last green run ({e})"
         else:
-            if sha is None:
+            # A re-run or a run that finished late can be green at a commit after HEAD:
+            # diffing against it would hide HEAD's own change.
+            sha = next((s for s in shas if _is_ancestor(root, s)), None)
+            if not shas:
                 why = f"no green run of {workflow} on {branch}"
-            elif not git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").strip():
-                why = f"git does not have {sha[:10]}, the last green run on {branch}"
+            elif sha is None:
+                why = f"no green run of {workflow} on {branch} before this commit in this clone"
     if why:
         say(f"{why}; every test counts as reached")
         return Reach.everything()
@@ -154,6 +155,14 @@ def _since_green(root, cfg, ctx, tm):
     }
     reach = reach_of(Picker(tm, root, cfg.tests).pick(sha), tests, cfg.flaky.reach_share)
     return dataclasses.replace(reach, since=sha)
+
+
+def _is_ancestor(root: str, sha: str) -> bool:
+    """Whether ``sha`` is HEAD or a commit before it; False when git lacks it."""
+    out = subprocess.run(
+        ["git", "-C", root, "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True
+    )
+    return out.returncode == 0
 
 
 def _caps(cfg, ctx, projects, maps) -> dict:
