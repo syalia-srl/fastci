@@ -115,22 +115,63 @@ A forgiven test is flagged, so someone fixes it. A flagged test still runs and i
 - `"marks"`: a test carrying `@pytest.mark.quarantine("#N")` (the mark is the `mark` setting) is flagged. fastci never edits your code; when a test flakes it prints the line to add:
 
   ```text
-  fastci: add @pytest.mark.quarantine("#?") to tests/test_links.py::test_reads_across_a_link
+  fastci: tests/test_links.py::test_reads_across_a_link
+            failed, then passed; this change does not reach it
+            passed in a fresh process: it may depend on test order
+            add @pytest.mark.quarantine("#?") to tests/test_links.py::test_reads_across_a_link
   ```
 
 - `"both"`: either flags a test, and the suggested mark names the issue's number.
 
-Marks are read in every mode, so a repository that already quarantines tests by hand keeps working.
+Marks are read in every mode, with or without an issue number, so a repository that already quarantines tests by hand keeps working.
+
+Writing issues needs `issues: write`, which the workflow `fastci setup` writes asks for. A token without it, such as a pull request's from a fork, still gets its verdict: GitHub's refusal costs one line in the verdict's block and in the job summary, and the run goes on.
+
+```text
+fastci: tests/test_links.py::test_reads_across_a_link
+          failed, then passed; this change does not reach it
+          passed in a fresh process: it may depend on test order
+          could not write the flag for tests/test_links.py::test_reads_across_a_link: HTTP Error 403: Forbidden
+```
+
+## Measuring on main
 
 Main measures. Each push to the default branch adds every flagged test's outcome and every forgiven test to `.fastci/flaky.json` (the last 50 outcomes per test) and uploads it as the `fastci-flaky` artifact for 90 days; the next run on main starts from the newest one. A test that two stages run, such as an `always` test in the whole suite, counts once per run, as a failure if either stage failed it. When a history exists but cannot be fetched or read (a server error, a timeout, a file that does not parse), the run says so in one line and writes none, so the upload leaves the newest history as it was; only a repository without one starts empty.
 
-A laptop reads the flags and never writes them. It fetches the open flaky issues with the token it uses for the map, gives up after 5 seconds in all, and keeps a copy in `.fastci/flagged.json` for when it is offline. A test forgiven there prints `failed and then passed; CI will flag it if it does the same there`.
-
-Writing issues needs `issues: write`, which the workflow `fastci setup` writes asks for. A token without it, such as a pull request's from a fork, still gets its verdict: GitHub's refusal costs one line, and the run goes on.
+Here is the test stage of a push to main, judged against the last green run three commits back. Two tests fail and pass on the retry: the commits since that run do not reach the first, which gets an issue, and do reach the second, which keeps main red. A flagged test that ran clean for the twentieth time since a change reached it leaves the list as the run ends:
 
 ```text
-fastci: could not write the flag for tests/test_links.py::test_reads_across_a_link: HTTP Error 403: Forbidden
+fastci: judged against the last green run on main, at 9f8e7d6a1b
+fastci: tests: the whole fast suite
+fastci: 2 failed; retrying them once, serially, in a fresh process
+fastci: tests/test_links.py::test_reads_across_a_link
+          failed, then passed; no commit since the last green run reaches it
+          passed in a fresh process: it may depend on test order
+          flagged as flaky: #31 (new)
+fastci: tests/test_api.py::test_upload_resumes
+          failed, then passed; the commits since 9f8e7d6 reach it through src/api/upload.py:resume
+          red: check for a race in what those commits touched
+fastci: tests failed (exit 1)
+fastci: tests/test_terminals.py::test_ctrl_c: unflagged, #18 closed
 ```
+
+In GitHub Actions the same run adds a table to the job summary, one row per judged test with the first line of its verdict and a link to its issue, then one row per flagged test that ran, `flagged, passed` or `flagged, failed`. The lines about the flags follow the table: an issue opened, a mark to add, a write GitHub refused.
+
+## Leaving the list
+
+A flagged test leaves the list when its issue is closed, by hand or by a pull request that says "fixes #N", or when fastci closes it. fastci closes it on main, after two things in this order: a push whose commits since the last green run reach the test lands on main, and main then runs the test `unflag-after` times in a row (20 by default) without a failure. A failure restarts the count but keeps the landing, so the next 20 clean runs are enough. fastci closes the issue with a comment naming the streak and the commit that reached the test:
+
+```text
+Passed 20 runs on main in a row since a change that reaches it landed (4c5d6e7). Unflagged.
+```
+
+A streak alone never unflags a test. One that fails 6% of the time passes 20 runs in a row 29% of the time, and would flap between flagged and blocking. A change that reaches it is the sign that someone worked on it.
+
+With `store = "marks"` fastci cannot remove the mark, so the run and the job summary say `the mark on tests/test_terminals.py::test_ctrl_c can go`. If the test fails and then passes again later, its closed issue reopens with a comment. `unflag-after = 0` never unflags: only closing the issue or removing the mark does.
+
+## On a laptop
+
+A laptop reads the flags and never writes them. It fetches the open flaky issues with the token it uses for the map, gives up after 5 seconds in all, and keeps a copy in `.fastci/flagged.json` for when it is offline. A test forgiven there prints `failed and then passed; CI will flag it if it does the same there`.
 
 ## Configuration
 
@@ -146,6 +187,7 @@ store = "issues"        # where flags live: "issues", "marks" or "both"
 label = "flaky"         # the issues' label
 mark = "quarantine"     # the mark read as a flag, quarantine("#N"); not fastci's or pytest's own
 flagged = "run"         # "skip": pull requests and laptops leave flagged tests out
+unflag-after = 20       # clean runs on main, after a change that reaches a flagged test, that unflag it; 0 never
 ```
 
 A tier can change the number of retries:
@@ -155,6 +197,26 @@ A tier can change the number of retries:
 retries = 0
 ```
 
+Every key is optional, and an unknown key or a value of the wrong type is a config error that names it.
+
+## A repository that quarantines by hand
+
+Some repositories already keep a list of flaky tests: a mark such as `@pytest.mark.quarantine` on each, an issue for each, and `-m "not quarantine"` in the pull request's test command so they do not cost time there. To move one to fastci:
+
+1. Keep the marks. Set `mark` to their name if it is not `quarantine`; an argument such as `"#776"` names the test's issue, and a mark without one flags the test too.
+2. Choose `flagged = "skip"` to keep today's time: pull requests and laptops leave the marked tests out, as `-m "not quarantine"` did.
+3. Remove that `-m "not quarantine"` from the test command. Main must run the marked tests, or it never measures them and never says when one is fixed.
+4. Choose `store`. With `"both"`, a new flake gets an issue and the line to add names it; with `"marks"`, fastci opens no issues and only prints the lines.
+
+```toml
+[tool.fastci.flaky]
+mark = "quarantine"
+flagged = "skip"
+store = "both"
+```
+
+The issues opened by hand carry no marker line, so fastci does not find them: it never closes them, and when such a test leaves the list the run says the mark can go.
+
 ## How it is built
 
-`FlakyConfig` holds the settings above. The pytest plugin writes a results file during the run, which `Results` reads: the tests that failed, the one that was running when the process died, and, when the session ends, the failures pytest counted and whether it stopped early. `Reach` is what a change reaches, built from the pick, and `judge` turns the failures, the retry and the reach into one `Verdict` per test, following the table above. `FlakyRun` carries the settings, the number of retries and the reach to the test stages, with a `Flagger` that reads the flags before the first test stage and writes them after each verdict, through the `issues` module, which finds each test's `Issue` by its marker, and the `History` of main's outcomes, one `Entry` per test.
+`FlakyConfig` holds the settings above. The pytest plugin writes a results file during the run, which `Results` reads: the tests that failed, the one that was running when the process died, and, when the session ends, the failures pytest counted and whether it stopped early. `Reach` is what a change reaches, built from the pick, and `judge` turns the failures, the retry and the reach into one `Verdict` per test, following the table above. `FlakyRun` carries the settings, the number of retries and the reach to the test stages, with a `Flagger` that reads the flags before the first test stage and writes them after each verdict, through the `issues` module, which finds each test's `Issue` by its marker, and the `History` of main's outcomes, one `Entry` per test. The entry also keeps whether a change that reaches the test has landed and how many clean runs followed it; after the last stage, the `Flagger` closes the flags that are due and appends its table to the job summary.

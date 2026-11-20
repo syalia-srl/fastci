@@ -18,15 +18,25 @@
 - Only SIGABRT, SIGBUS, SIGSEGV, SIGKILL, SIGILL and SIGFPE blame the test
   that was running; SIGTERM and SIGINT do not.
 - `[tool.fastci.flaky]`: `retries`, `machine-threshold`, `reach-share`,
-  `forgive-reached`; a tier table takes `retries`. A value of the wrong type or
-  out of range is a config error naming its key.
+  `forgive-reached`, `store`, `label`, `mark`, `flagged`, `unflag-after`; a
+  tier table takes `retries`. A value of the wrong type or out of range is a
+  config error naming its key.
 - A forgiven test is flagged: as a GitHub issue labelled `flaky`, as a
-  `quarantine` mark fastci asks you to add, or both (`store`, `label`, `mark`,
-  `flagged`). A flagged test still runs, but its failure no longer blocks. Each
-  push to the default branch records the flagged and forgiven tests' outcomes,
-  once per run, in the `fastci-flaky` artifact; a history that exists but
-  cannot be fetched or read is left as it was. `retries = 0` turns flags off
-  on that tier, and a laptop reads the flags within 5 seconds.
+  `quarantine` mark fastci asks you to add, or both. A flagged test still runs,
+  but its failure no longer blocks and is not retried; with `flagged = "skip"`
+  pull requests and laptops leave it out. Each push to the default branch
+  records the flagged and forgiven tests' outcomes, once per run, in the
+  `fastci-flaky` artifact; a history that exists but cannot be fetched or read
+  is left as it was. `retries = 0` turns flags off on that tier. A laptop reads
+  the flags within 5 seconds, keeps a copy for when it is offline, and never
+  writes a flag or the history.
+- A flagged test leaves the list when its issue is closed, or when a change
+  that reaches it has landed on main and main has then run it `unflag-after`
+  times in a row (20) without a failure: fastci closes the issue with a
+  comment, or says the mark can go. A streak alone never unflags a test.
+- Nothing GitHub answers changes a verdict: a refused write, a missing token or
+  a timeout costs one line. In GitHub Actions the job summary gets a table of
+  the judged and flagged tests with their issues.
 - The book: a chapter on flaky tests.
 
 ## 0.2.1
