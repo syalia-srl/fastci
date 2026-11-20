@@ -134,3 +134,13 @@ def test_marks_skip_what_pytest_does_not_collect(tmp_path):
     (tmp_path / "tests/test_ui.py").write_text(ui)
     marks = [c.path for c in setup.propose(str(tmp_path)) if c.kind == "mark"]
     assert marks == ["tests/test_ui.py"]
+
+
+def test_workflow_writes_issues_and_uploads_the_flaky_history(tmp_path):
+    [wf] = [c for c in setup.propose(str(copy(tmp_path, "setup-bare"))) if c.kind == "add-file"]
+    assert "  issues: write\n" in wf.after
+    check = wf.after.split("\n  map:")[0]
+    assert "name: fastci-flaky" in check and "path: .fastci/flaky.json" in check
+    assert "retention-days: 90" in check and "if-no-files-found: ignore" in check
+    branch = "github.ref == 'refs/heads/main'"
+    assert f"if: always() && github.event_name == 'push' && {branch}" in check

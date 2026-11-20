@@ -3,7 +3,9 @@
 One JSON line per event: ``started`` before a test, ``outcome`` for each failed
 phase and for the call phase, ``finished`` after it, ``crashed`` when an
 xdist worker died running it, and ``session`` when pytest ended: the failures
-it counted and whether it stopped early.
+it counted and whether it stopped early. An outcome line of a test flagged as
+flaky carries ``flagged`` (its issue number, or true) and the real outcome; pytest
+counted its failure as an expected one, so it is not in ``failed``.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ class Results:
     crashed: set[str] = field(default_factory=set)
     errors: dict[str, str] = field(default_factory=dict)
     outcomes: dict[str, str] = field(default_factory=dict)
+    flagged: dict[str, int | None] = field(default_factory=dict)  # flaky test: its issue
     failed_reports: int = 0  # failed outcome lines; a test may fail in call and teardown
     testsfailed: int | None = None  # pytest's own count; None: the session never ended
     stopped: bool = False  # pytest stopped before running every test (-x, --maxfail)
@@ -73,16 +76,22 @@ def read(path: str, signalled: bool) -> Results | None:
                 finished.add(nodeid)
             elif ev["e"] == "crashed":
                 r.crashed.add(nodeid)
-            elif ev["outcome"] == "failed":
-                r.failed_reports += 1
-                if nodeid not in r.errors:
-                    r.failed.append(nodeid)
-                    r.errors[nodeid] = ev["error"]
-            elif ev["when"] == "call" and ev["outcome"] == "passed":
-                call_passed.add(nodeid)
+            else:
+                if "flagged" in ev:
+                    flagged = ev["flagged"]
+                    r.flagged[nodeid] = None if flagged is True else flagged
+                if ev["outcome"] == "failed":
+                    # pytest counted a flagged test's failure as an expected one.
+                    if nodeid not in r.flagged:
+                        r.failed_reports += 1
+                        if nodeid not in r.errors:
+                            r.failed.append(nodeid)
+                    r.errors.setdefault(nodeid, ev["error"])
+                elif ev["when"] == "call" and ev["outcome"] == "passed":
+                    call_passed.add(nodeid)
     if signalled:
         r.crashed |= {nodeid for nodeid in started if nodeid not in finished}
-    r.passed = call_passed - set(r.failed) - r.crashed
+    r.passed = call_passed - r.errors.keys() - r.crashed
     # A skipped or xfailed test neither passed nor failed: it gets no outcome.
     for nodeid in finished | r.crashed:
         if nodeid in r.errors or nodeid in r.crashed:

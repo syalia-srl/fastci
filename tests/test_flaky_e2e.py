@@ -7,7 +7,7 @@ import sys
 import pytest
 from conftest import commit, run_testmap, sh
 
-from fastci import cli, fetch
+from fastci import cli, fetch, issues
 
 FLAKY = """import os
 
@@ -135,12 +135,16 @@ def on_main(sample, tmp_path, monkeypatch):
         monkeypatch.delenv(k)
     monkeypatch.setenv("CI", "true")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_REF_NAME", "main")
     monkeypatch.setenv("GITHUB_WORKFLOW_REF", "o/r/.github/workflows/fastci.yml@refs/heads/main")
     monkeypatch.setenv("GITHUB_RUN_ID", "9")
     monkeypatch.setenv("GH_TOKEN", "t")
     monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: None)
+    # No flaky issue yet; an issue fastci opens is number 1.
+    monkeypatch.setattr(issues, "listed", lambda *a, **k: {})
+    monkeypatch.setattr(fetch, "_send", lambda *a, **k: {"number": 1})
     monkeypatch.chdir(sample)
     state = {"green": None, "asked": []}
 

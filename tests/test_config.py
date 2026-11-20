@@ -166,6 +166,13 @@ retries = 0
         ('[tool.fastci.flaky]\nreach-share = "x%"', "reach-share in"),
         ("[tool.fastci.flaky]\nlabel = 3", "label must be a string"),
         ("[tool.fastci.flaky]\nforgive-reached = 1", "forgive-reached must be true or false"),
+        ('[tool.fastci.flaky]\nmark = "slow"', "mark must not be one of fastci's own marks"),
+        ('[tool.fastci.flaky]\nmark = "always"', "mark must not be one of fastci's own marks"),
+        ('[tool.fastci.flaky]\nmark = ""', "mark must not be empty"),
+        *(
+            (f'[tool.fastci.flaky]\nmark = "{m}"', f"mark must not be pytest's own mark ('{m}')")
+            for m in ("skip", "skipif", "xfail", "parametrize", "usefixtures", "filterwarnings")
+        ),
     ],
 )
 def test_flaky_rejects(tmp_path, body, msg):

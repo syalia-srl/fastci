@@ -42,6 +42,23 @@ def _get(url: str, token: str, follow: bool = True, timeout: float = 60):
         raise
 
 
+def _send(method: str, url: str, token: str, body: dict, timeout: float = 30) -> dict:
+    """A write to the API: ``body`` goes as JSON, the JSON answer comes back."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
 def newest_artifact(
     repo: str, name: str, branch: str, token: str, timeout: float = 60
 ) -> dict | None:
@@ -75,12 +92,14 @@ def green_shas(
     return [run["head_sha"] for run in runs if str(run["id"]) != exclude_run]
 
 
-def _download(url: str, token: str, out: str) -> None:
+def _download(url: str, token: str, out: str, suffix: str = ".json.gz") -> None:
     first = _get(url, token, follow=False)
     location = first.headers.get("Location")
     data = urllib.request.urlopen(location, timeout=120).read() if location else first.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        member = next(n for n in z.namelist() if n.endswith(".json.gz"))
+        member = next((n for n in z.namelist() if n.endswith(suffix)), None)
+        if member is None:
+            raise FileNotFoundError(f"the artifact holds no {suffix} file")
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         with open(out, "wb") as f:
             f.write(z.read(member))

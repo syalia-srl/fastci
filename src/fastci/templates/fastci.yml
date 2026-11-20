@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
 concurrency:
   group: fastci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -24,6 +25,14 @@ jobs:
       - run: uvx --from git+https://github.com/syalia-srl/fastci@v@@VERSION@@ fastci
         env:
           GH_TOKEN: ${{ github.token }}
+      # The flaky tests' outcomes on @@BRANCH@@, which the next run there extends.
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/@@BRANCH@@'
+        with:
+          name: fastci-flaky
+          path: .fastci/flaky.json
+          retention-days: 90
+          if-no-files-found: ignore
   # Records what every test runs, for picking in pull requests. Never gates.
   map:
     if: github.event_name == 'push' && github.ref == 'refs/heads/@@BRANCH@@'
