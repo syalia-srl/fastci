@@ -39,6 +39,32 @@ def test_ñandú(): pass
     assert r.crashed == set()
 
 
+def test_a_teardown_error_is_a_failed_test_explained_to_pytest(pytester, tmp_path, monkeypatch):
+    # fastci retries what results.failed holds, so a teardown error is retried like
+    # a call failure; a test failing in call and teardown is one test, two reports.
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    pytester.makepyfile(
+        test_t="""
+import pytest
+@pytest.fixture
+def leaky():
+    yield
+    raise RuntimeError("left a server running")
+def test_clean_call(leaky): pass
+def test_both(leaky): assert 0
+def test_ok(): pass
+"""
+    )
+    pytester.runpytest_subprocess("-p", "fastci.python.plugin")
+    r = results.read(str(out), signalled=False)
+    assert r.failed == ["test_t.py::test_clean_call", "test_t.py::test_both"]
+    assert r.errors["test_t.py::test_clean_call"].startswith("RuntimeError: left a server")
+    assert r.passed == {"test_t.py::test_ok"}
+    assert r.outcomes["test_t.py::test_clean_call"] == "failed"
+    assert (r.failed_reports, r.testsfailed, r.explained) == (3, 3, True)
+
+
 def test_skipped_and_xfailed_tests_have_no_outcome(pytester, tmp_path, monkeypatch):
     out = tmp_path / "r.jsonl"
     monkeypatch.setenv("FASTCI_RESULTS", str(out))
