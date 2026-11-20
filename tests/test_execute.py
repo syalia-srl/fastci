@@ -2,6 +2,8 @@ import gzip
 import json
 import urllib.error
 
+import pytest
+
 from fastci import execute as ex
 from fastci import fetch
 from fastci.adapter import Project
@@ -267,3 +269,29 @@ def test_fail_fast_resumes_after_a_forgiven_flake():
     assert run([tests_step()], a, fail_fast_tests=True, flaky=flaky()) == 0
     assert len(a.calls) == 3 and a.done == [{"a", "b"}]
     assert a.calls[2][0] == ["tests/test_a.py"] and "--maxfail=1" in a.calls[2][1]
+
+
+@pytest.mark.parametrize("code", [2, 3, 4])
+def test_forgiven_failures_do_not_hide_a_pytest_error(code):
+    a = FakeAdapter(script=[(code, events(["b"], ["a"])), (0, events(["a"]))])
+    assert run([tests_step()], a, fail_fast_tests=False, flaky=flaky()) == code
+    assert len(a.calls) == 1
+
+
+STOP_EARLY = [["--maxfail=1"], ["--maxfail=3"], ["--maxfail", "3"], ["-x"], ["--exitfirst"]]
+
+
+@pytest.mark.parametrize("stop", STOP_EARLY)
+def test_a_retry_round_runs_every_failed_test(stop):
+    step = Step("tests", ".", "run", ["-q", *stop, "-v"], ["tests/test_a.py"], "")
+    a = FakeAdapter(script=[(1, events([], ["a", "b"])), (0, events(["a", "b"])), (0, [])])
+    assert run([step], a, fail_fast_tests=False, flaky=flaky()) == 0
+    assert a.calls[1][1] == ["-q", "-v"]
+
+
+@pytest.mark.parametrize("stop", STOP_EARLY)
+def test_any_stop_early_flag_resumes_after_a_forgiven_flake(stop):
+    step = Step("tests", ".", "run", ["-q", *stop], ["tests/test_a.py"], "")
+    a = FakeAdapter(script=[(1, events(["b"], ["a"])), (0, events(["a"])), (0, events(["c"]))])
+    assert run([step], a, fail_fast_tests=False, flaky=flaky()) == 0
+    assert len(a.calls) == 3 and a.done == [{"a", "b"}]
