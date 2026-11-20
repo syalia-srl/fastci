@@ -157,8 +157,8 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
     <p>A test that fails and then passes gets a GitHub issue with the label <code>flaky</code>, a failure rate kept up to date by main's runs, and the last error. A mark in the code works too.</p>
   </div>
   <div class="card">
-    <h4>Flagged tests stop costing time</h4>
-    <p>A flagged test still runs and its result is counted, but it neither blocks a run nor gets retried. It leaves the list by itself after a configurable number of clean runs on main.</p>
+    <h4>Flagged tests stop costing reruns</h4>
+    <p>A flagged test still runs and its result is counted, but it neither blocks a run nor gets retried, so nobody reruns a job for it. <code>flagged = "skip"</code> also saves its time. It leaves the list once a change that reaches it has landed and main has run it clean since.</p>
   </div>
 </div>
 <p>Measured on three repositories, over their last 500 workflow runs each (October and November 2026):</p>
@@ -178,12 +178,14 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <tr><td>"The change reaches the test"</td><td>The pick named it through a rule that reads the diff (rules 2 to 5 of the picker); a test that runs because it is marked <code>always</code>, because a <code>full</code> path changed, or because the tier runs everything, is not reached</td><td class="why">These are the tests whose failure the diff could have caused, by the map's own account.</td></tr>
 <tr><td>A pull request fastci cannot judge</td><td>With no map, or no merge-base, every test that runs counts as reached: a pass on retry stays red</td><td class="why">When fastci cannot tell what the diff reaches, it assumes the diff reaches it, so a pull request's own race never goes green in a repository that has no map yet.</td></tr>
 <tr><td>A broken machine</td><td><code>machine-threshold</code> tests (default 3) failing and then passing in one run turns it red with "this looks like the machine"</td><td class="why">One rescued attempt in 21 had two failures; none had three. Three unrelated flakes in one run are rarer than one sick runner.</td></tr>
-<tr><td>A crash by signal</td><td>A test whose process died by a signal (SIGSEGV, SIGBUS, SIGKILL, an xdist worker lost) is never forgiven</td><td class="why">These are faults of the code or the machine, the opposite of a timing flake.</td></tr>
+<tr><td>A crash by signal</td><td>A test whose process died by a signal (SIGSEGV, SIGBUS, SIGKILL, an xdist worker lost) is never forgiven. The plugin writes a <code>started</code> line before each test; a test with no outcome after it, in a pytest that exited by a signal (negative or 128+n) or lost its worker, is the one that crashed</td><td class="why">These are faults of the code or the machine, the opposite of a timing flake.</td></tr>
 <tr><td>Where the flag lives</td><td>Configurable: <code>store = "issues"</code> (default), <code>"marks"</code> or <code>"both"</code>. Marks in the code are always read</td><td class="why"><span class="who">maintainer</span> Issues are where fixing is planned and CI can open them alone; some repositories prefer the mark in the diff, as one already does.</td></tr>
 <tr><td>The mark's name</td><td><code>quarantine("#N")</code> by default, configurable</td><td class="why"><code>flaky</code> is taken: pytest-rerunfailures and the flaky package read <code>@pytest.mark.flaky</code> as "rerun this". One repository already uses <code>quarantine</code>.</td></tr>
 <tr><td>A flagged test</td><td>Runs, never blocks, never retried; <code>flagged = "skip"</code> deselects it on laptops and pull requests, while main still runs it so its clean runs can count</td><td class="why"><span class="who">maintainer</span> Its rate keeps being measured, which is what tells when it is fixed.</td></tr>
-<tr><td>Leaving the list</td><td>After <code>unflag-after</code> passing runs on main in a row (default 20), fastci closes the issue with a comment; 0 never closes</td><td class="why"><span class="who">maintainer</span> A fixed test should not stay excused by hand-kept state.</td></tr>
-<tr><td>Retries</td><td>1 by default, in a fresh pytest process, on the same machine; <code>retries = 0</code> turns the feature off</td><td class="why">A fresh process drops module state a failed test left behind; the same machine keeps a broken runner visible.</td></tr>
+<tr><td>Leaving the list</td><td>Only after a change that reaches the test has landed on main, and main has then run it <code>unflag-after</code> times in a row without a failure (default 20). Then fastci closes the issue with a comment. Closing the issue by hand, or a pull request that says "fixes #N", also unflags it</td><td class="why"><span class="who">maintainer</span> A fixed test should not stay excused by hand-kept state. A streak alone is not enough: a test that fails 6% of the time passes 20 in a row 29% of the time, and would flap between flagged and blocking.</td></tr>
+<tr><td>Main has a diff too</td><td>On main, the diff is the one since the last green run on main; a test it reaches that fails and then passes keeps main red, as on a pull request</td><td class="why">A race a pull request brought in that did not show in its own run, and shows right after the merge, must not be flagged as flaky. The release tier judges the same way against the last green run on its branch.</td></tr>
+<tr><td>Finding a test's issue</td><td>The body carries the node id in an HTML comment, <code>&lt;!-- fastci:test=... --&gt;</code>; fastci lists the open and closed issues with the label and matches that line exactly. The history file also keeps the issue number</td><td class="why">GitHub's title search is fuzzy, and node ids with parameters and long paths collide in it.</td></tr>
+<tr><td>Retries</td><td>1 by default, in a fresh pytest process, serially (xdist's <code>-n</code> and <code>--dist</code> removed from the arguments), on the same machine; <code>retries = 0</code> turns the feature off</td><td class="why">A fresh process drops module state a failed test left behind; the same machine keeps a broken runner visible. The cost: a test that fails because of what an earlier test left behind passes in a fresh process. The issue says "passed in a fresh process: it may depend on test order", so whoever fixes it does not hunt for a race.</td></tr>
 <tr><td>Who writes issues</td><td>Any CI tier whose token may write issues; a laptop never writes</td><td class="why">A flake seen on a pull request is evidence too. A laptop under load is not.</td></tr>
 <tr><td>Where history is kept</td><td>A small file, <code>.fastci/flaky.json</code>, that main's <code>check</code> job fetches, extends and uploads as the artifact <code>fastci-flaky</code></td><td class="why">It works with either store, and the issue body is rendered from it rather than parsed back. The <code>check</code> job is the one that judges; the map job can be cancelled and its recording run proves nothing about flakes.</td></tr>
 <tr><td>Pull-request occurrences</td><td>A comment on the test's issue, one per occurrence; not part of the history file</td><td class="why">Only main may write main's history. A comment survives the next main run's re-render of the body, and flakes on pull requests are rare enough that a comment each is not noise.</td></tr>
@@ -203,7 +205,8 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <tr><td>Passed on retry, and the change does not reach the test</td><td><span class="green">green</span></td><td class="why">"Test X failed and then passed; this change does not reach it. Flagged as flaky: #N." Opens the issue, or adds the occurrence to it.</td></tr>
 </tbody>
 </table>
-<p>On main and on a release branch every test runs and no diff is judged, so no test counts as reached: a pass on retry there goes green and flags the test, subject to the machine and signal rows.</p>
+<p>On main and on a release branch every test runs, and the diff judged is the one since the last green run on that branch. A test that diff reaches stays red on a pass on retry; any other test goes green and is flagged. When no green run is found, every test counts as reached, as on a pull request fastci cannot judge.</p>
+<p>On a pull request the pick is, by construction, what the diff reaches, so a test that fails and then passes there is nearly always reached and stays red. The green-and-flag row happens on a pull request only for tests marked <code>always</code> or a run forced by a <code>full</code> path. Flags are born mostly on main, and on pull requests the time saved comes from the tests already flagged.</p>
 
 <h3 id="try">Try it</h3>
 <div class="sim" id="sim">
@@ -225,15 +228,15 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 
 <h2 id="retry"><span class="n">04</span>Retrying</h2>
 <div class="steps">
-  <div class="step"><div class="n"></div><div><h4>Results, not the exit code</h4><p>The plugin writes each test's outcome to a results file (<code>FASTCI_RESULTS</code>): node id, outcome, phase, duration, and whether the worker died. fastci reads the verdict from that file. The exit code only tells it that pytest itself broke.</p></div></div>
-  <div class="step"><div class="n"></div><div><h4>Flagged tests do not fail pytest</h4><p>The plugin reads the flagged list (<code>FASTCI_FLAGGED</code>) and reports a flagged test's failure as an expected failure with the reason "flagged flaky: #N". pytest's exit code and <code>--maxfail</code> ignore it; the results file keeps the real outcome.</p></div></div>
-  <div class="step"><div class="n"></div><div><h4>One retry per failed test, after the stage</h4><p>When the stage ends, fastci runs the failed tests again, serially, in one fresh pytest process on the same machine, with the same arguments. A test that passes in any of <code>retries</code> rounds passed on retry.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>Results and the exit code</h4><p>The plugin writes to a results file (<code>FASTCI_RESULTS</code>) a <code>started</code> line before each test and an outcome line after it: node id, outcome, phase, duration. fastci reads the verdict from that file. A test started and never finished, in a pytest that exited by a signal or lost an xdist worker, crashed its process: that is the signal row of the rule.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>Flagged tests do not fail pytest</h4><p>The plugin reads the flagged list (<code>FASTCI_FLAGGED</code>) and reports a flagged test's failure as a non-strict expected failure (<code>strict=False</code>, whatever <code>xfail_strict</code> says) with the reason "flagged flaky: #N", so a pass is not an error. pytest's exit code and <code>--maxfail</code> ignore it; the results file keeps the real outcome.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>One retry per failed test, after the stage</h4><p>When the stage ends, fastci runs the failed tests again, serially (the xdist flags removed), in one fresh pytest process on the same machine, with the other arguments unchanged. A test that passes in any of <code>retries</code> rounds passed on retry.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>The stage resumes when it stopped early</h4><p>On a laptop the stage stops at the first failure. If the verdict forgives it, fastci runs the stage again without the tests that already passed, so the rest of the picked tests still run.</p></div></div>
 </div>
 
 <h2 id="flag"><span class="n">05</span>The flag</h2>
 <h3>As an issue (<code>store = "issues"</code>, the default)</h3>
-<p>One issue per test, labelled <code>flaky</code> (configurable), titled with the node id. fastci finds it by label and title. Its body is rendered from the history and replaced on each update; fastci comments only when the issue opens, when it reopens, and when it closes.</p>
+<p>One issue per test, labelled <code>flaky</code> (configurable), titled with the node id, with the node id again in an HTML comment that fastci matches exactly. Its body is rendered from the history and replaced on each update; fastci comments only when the issue opens, reopens or closes, and for each occurrence on a pull request.</p>
 <pre>flaky: tests/test_terminals.py::test_ctrl_c_reaches_the_foreground_program
 
 Failed and then passed on retry. fastci keeps this issue up to date.
@@ -248,8 +251,8 @@ First seen: a1b2c3d (run 4412), 2026-11-03
 Last failure: e4f5a6b (run 4519), 2026-11-19
   AssertionError: timed out after 5.0 s waiting for "^C"
 
-It no longer blocks a run. It leaves the list after 20 passing runs on main
-in a row; 7 so far.</pre>
+It no longer blocks a run. It leaves the list once a change that reaches it
+has landed on main and main has run it 20 times in a row without a failure.</pre>
 <p>The workflow that <code>fastci setup</code> writes asks for <code>issues: write</code>. A token without it (a pull request from a fork) still gets the verdict; the summary says the flag could not be written.</p>
 
 <h3>As a mark (<code>store = "marks"</code>)</h3>
@@ -263,20 +266,21 @@ in a row; 7 so far.</pre>
 <li>It uploads the file as <code>fastci-flaky</code> with 90 days of retention, even when the run is red.</li>
 </ol>
 <p>Two main runs that overlap can each extend the same older file, and the later upload wins; one run's outcomes are lost, which a 50-run window absorbs. When no history can be fetched (the first run, or every artifact expired), it starts empty: the flags themselves live in the issues or the marks, so nothing is unflagged by the loss, only the count toward <code>unflag-after</code> restarts.</p>
-<p>A flagged test that passes <code>unflag-after</code> runs on main in a row leaves the list: fastci closes the issue with a comment saying so, or with marks, the summary says the mark can go. If it fails again later, the issue reopens.</p>
+<p>A flagged test leaves the list when its issue is closed, by hand or by a pull request that says "fixes #N", or when fastci closes it: after a commit whose diff reaches the test has landed on main, main has run it <code>unflag-after</code> times in a row without a failure. Without a change that reaches it, a streak alone never unflags it. With marks, the summary says the mark can go. If it fails again later, the issue reopens.</p>
 
 <h2 id="laptop"><span class="n">07</span>On a laptop</h2>
 <p>The same rule, with one difference: a laptop reads the flags but never writes them. It fetches the open <code>flaky</code> issues with the token it already uses for the map, keeps the list of flagged node ids and issue numbers in <code>.fastci/flagged.json</code>, and falls back to that copy when offline. It never fetches or writes the history file. A test forgiven on a laptop prints "failed and then passed; CI will flag it if it does the same there".</p>
 
 <h2 id="report"><span class="n">08</span>What a run prints</h2>
-<pre>fastci: tests: 212 picked
-fastci: 2 failed; retrying them once
+<p>A run on main, judged against the last green run on main (3 commits back):</p>
+<pre>fastci: tests: the whole fast suite
+fastci: 2 failed; retrying them once, serially, in a fresh process
 fastci: tests/test_links.py::test_an_agent_reads_and_enqueues_across_any_link
-          failed, then passed; this change does not reach it
-          flagged as flaky: #31 (new)
+          failed, then passed; no commit since the last green run reaches it
+          flagged as flaky: #31 (new); passed in a fresh process: it may depend on test order
 fastci: tests/test_api.py::test_upload_resumes
-          failed, then passed; this change reaches it through src/api/upload.py:resume
-          red: check for a race in what the change touched
+          failed, then passed; 9f8e7d6 reaches it through src/api/upload.py:resume
+          red: check for a race in what that commit touched
 fastci: 1 flagged test ran: tests/test_terminals.py::test_ctrl_c... passed (#18)
 fastci: tests failed (exit 1)</pre>
 <p>The same lines go into the job summary as a table, one row per judged test, with its verdict and issue link.</p>
@@ -289,11 +293,11 @@ store = "issues"          # "issues", "marks" or "both"
 label = "flaky"           # the issue label
 mark = "quarantine"       # the mark read as flagged, quarantine("#N")
 flagged = "run"           # "run": run and count, never block; "skip": deselect off main
-unflag-after = 20         # passing runs on main in a row that close the flag; 0 never
+unflag-after = 20         # clean runs on main, after a change that reaches it, that close the flag; 0 never
 forgive-reached = false   # true: also forgive a test the change reaches
 
 [tool.fastci.tiers.release]
-retries = 0               # a tier may override retries</pre>
+retries = 0               # example: a tier may override retries; by default every tier retries once
 <p>Every key is optional. Unknown keys are errors, as in the rest of the config.</p>
 
 <h2 id="approaches"><span class="n">10</span>Approaches considered</h2>
@@ -342,20 +346,19 @@ const $ = (id) => document.getElementById(id);
 let tier = "pr";
 function judge() {
   const f = $("o-flagged").checked, sig = $("o-signal").checked, retry = $("o-retry").checked;
-  const reached = $("o-reached").checked && tier !== "main";
+  const reached = $("o-reached").checked;
   const n = +$("o-n").value, store = $("o-store").value;
   $("o-nv").textContent = n;
-  $("o-reached").disabled = tier === "main";
   const id = "tests/test_links.py::test_reads_across_a_link";
   let v, out;
   if (f) { v = ["green", "never blocks"]; out = `${id} is flagged (#31): its result goes into the history, not the verdict.`; }
   else if (sig) { v = ["red", "red"]; out = `${id} killed its process with SIGBUS: a fault in the code or the machine, not a flake. Not retried.`; }
   else if (!retry) { v = ["red", "red"]; out = `${id} failed, and failed again on retry.`; }
   else if (n >= 3) { v = ["red", "red"]; out = `${n} tests failed and then passed in this run: this looks like the machine, not the code. None flagged.`; }
-  else if (reached) { v = ["red", "red"]; out = `${id} failed, then passed; this change reaches it through src/links.py:read.\nCheck for a race in what the change touched. Not flagged.`; }
+  else if (reached) { v = ["red", "red"]; out = `${id} failed, then passed; ${tier === "main" ? "a commit since the last green run" : "this change"} reaches it through src/links.py:read.\nCheck for a race in what it touched. Not flagged.`; }
   else {
     v = ["green", "green"];
-    const where = tier === "main" ? "main runs the whole suite" : "this change does not reach it";
+    const where = tier === "main" ? "no commit since the last green run reaches it" : "this change does not reach it";
     const write = tier === "local" ? "CI will flag it if it does the same there (a laptop never writes flags)."
       : store === "marks" ? `Flagged: add @pytest.mark.quarantine("#?") to it; the job summary lists it.`
       : store === "both" ? `Flagged as flaky: #31 (new). Suggested mark: @pytest.mark.quarantine("#31").`
