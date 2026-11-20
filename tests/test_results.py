@@ -21,7 +21,7 @@ def broken():
 def test_ok(): pass
 def test_bad(): assert 1 == 2
 def test_setup(broken): pass
-@pytest.mark.parametrize("x", ["sigere-api", "a b/c", "ñ"])
+@pytest.mark.parametrize("x", ["svc-api", "a b/c", "ñ"])
 def test_p(x): pass
 def test_ñandú(): pass
 """
@@ -29,7 +29,7 @@ def test_ñandú(): pass
     pytester.runpytest_subprocess("-p", "fastci.python.plugin")
     r = results.read(str(out), signalled=False)
     assert r.failed == ["test_a.py::test_bad", "test_a.py::test_setup"]
-    assert "test_a.py::test_p[a b/c]" in r.passed and "test_a.py::test_p[sigere-api]" in r.passed
+    assert "test_a.py::test_p[a b/c]" in r.passed and "test_a.py::test_p[svc-api]" in r.passed
     # pytest itself escapes non-ASCII parameter ids; a function name stays as written.
     assert "test_a.py::test_p[\\xf1]" in r.passed and "test_a.py::test_ñandú" in r.passed
     assert "test_a.py::test_ok" in r.passed
@@ -37,6 +37,27 @@ def test_ñandú(): pass
     assert r.outcomes["test_a.py::test_setup"] == "failed"
     assert r.outcomes["test_a.py::test_ok"] == "passed"
     assert r.crashed == set()
+
+
+def test_skipped_and_xfailed_tests_have_no_outcome(pytester, tmp_path, monkeypatch):
+    out = tmp_path / "r.jsonl"
+    monkeypatch.setenv("FASTCI_RESULTS", str(out))
+    pytester.makepyfile(
+        test_s="""
+import pytest
+def test_ok(): pass
+@pytest.mark.skip
+def test_marked(): pass
+def test_inside(): pytest.skip("not here")
+@pytest.mark.xfail
+def test_xfail(): assert 0
+"""
+    )
+    pytester.runpytest_subprocess("-p", "fastci.python.plugin")
+    r = results.read(str(out), signalled=False)
+    assert r.outcomes == {"test_s.py::test_ok": "passed"}
+    assert r.passed == {"test_s.py::test_ok"}
+    assert r.failed == []
 
 
 def test_a_test_that_kills_pytest_is_the_crashed_one(pytester, tmp_path, monkeypatch):

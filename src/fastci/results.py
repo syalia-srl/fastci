@@ -60,7 +60,11 @@ def read(path: str, signalled: bool) -> Results | None:
                 call_passed.add(nodeid)
     if signalled:
         r.crashed |= {nodeid for nodeid in started if nodeid not in finished}
-    r.passed = call_passed - set(r.failed)
+    r.passed = call_passed - set(r.failed) - r.crashed
+    # A skipped or xfailed test neither passed nor failed: it gets no outcome.
     for nodeid in finished | r.crashed:
-        r.outcomes[nodeid] = "failed" if nodeid in r.errors or nodeid in r.crashed else "passed"
+        if nodeid in r.errors or nodeid in r.crashed:
+            r.outcomes[nodeid] = "failed"
+        elif nodeid in r.passed:
+            r.outcomes[nodeid] = "passed"
     return r
