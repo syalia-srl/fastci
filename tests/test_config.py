@@ -148,8 +148,28 @@ retries = 0
         ('[tool.fastci.flaky]\nstore = "db"', 'store must be "issues", "marks" or "both"'),
         ('[tool.fastci.flaky]\nflagged = "hide"', 'flagged must be "run" or "skip"'),
         ("[tool.fastci.flaky]\nretries = -1", "retries must be 0 or more"),
+        ('[tool.fastci.flaky]\nretries = "x"', "flaky retries must be a whole number"),
+        ("[tool.fastci.flaky]\nretries = 1.5", "flaky retries must be a whole number"),
+        ("[tool.fastci.flaky]\nretries = true", "flaky retries must be a whole number"),
+        ('[tool.fastci.tiers.pr]\nretries = "2"', "tiers.pr retries must be a whole number"),
+        ("[tool.fastci.tiers.pr]\nretries = 1.5", "tiers.pr retries must be a whole number"),
+        ("[tool.fastci.tiers.pr]\nretries = -1", "tiers.pr retries must be 0 or more"),
+        ("[tool.fastci.flaky]\nmachine-threshold = 0", "machine-threshold must be 1 or more"),
+        ("[tool.fastci.flaky]\nmachine-threshold = -2", "machine-threshold must be 1 or more"),
+        ('[tool.fastci.flaky]\nmachine-threshold = "3"', "machine-threshold must be a whole"),
+        ("[tool.fastci.flaky]\nunflag-after = -1", "unflag-after must be 0 or more"),
+        ("[tool.fastci.flaky]\nunflag-after = 2.5", "unflag-after must be a whole number"),
+        ("[tool.fastci.flaky]\nreach-share = 1.5", "reach-share must be between 0 and 1"),
+        ('[tool.fastci.flaky]\nreach-share = "150%"', "reach-share must be between 0 and 1"),
+        ("[tool.fastci.flaky]\nreach-share = -0.1", "reach-share must be between 0 and 1"),
+        ("[tool.fastci.flaky]\nreach-share = true", "reach-share must be a share"),
+        ('[tool.fastci.flaky]\nreach-share = "x%"', "reach-share in"),
+        ("[tool.fastci.flaky]\nlabel = 3", "label must be a string"),
+        ("[tool.fastci.flaky]\nforgive-reached = 1", "forgive-reached must be true or false"),
     ],
 )
 def test_flaky_rejects(tmp_path, body, msg):
-    with pytest.raises(config.ConfigError, match=re.escape(msg)):
+    # A ConfigError naming the key, never a TypeError or a ValueError from int().
+    with pytest.raises(config.ConfigError, match=re.escape(msg)) as e:
         load_text(tmp_path, body)
+    assert type(e.value) is config.ConfigError

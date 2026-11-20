@@ -144,10 +144,8 @@ def _tiers(table: dict, where: str) -> dict[str, TierSpec]:
             marks=_names(value.get("marks", base.marks), f"{w} marks"),
             fail_fast=bool(value.get("fail-fast", base.fail_fast)),
             capped=bool(value.get("capped", base.capped)),
-            retries=value.get("retries", base.retries),
+            retries=_int(value["retries"], w, "retries", 0) if "retries" in value else base.retries,
         )
-        if spec.retries is not None and spec.retries < 0:
-            raise ConfigError(f"{w} retries must be 0 or more")
         if spec.tests not in ("picked", "all"):
             raise ConfigError(f'{w} tests must be "picked" or "all"')
         if spec.without_map not in ("changed", "all"):
@@ -161,8 +159,39 @@ def _tiers(table: dict, where: str) -> dict[str, TierSpec]:
 
 def _percent(value, where: str, key: str = "memory") -> float:
     if isinstance(value, str) and value.endswith("%"):
-        return float(value[:-1]) / 100
+        try:
+            return float(value[:-1]) / 100
+        except ValueError:
+            pass
     raise ConfigError(f'{key} in {where} must be a percentage such as "50%"')
+
+
+def _int(value, where: str, key: str, least: int) -> int:
+    # TOML's true and false are ints to Python.
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigError(f"{where} {key} must be a whole number, {least} or more")
+    if value < least:
+        raise ConfigError(f"{where} {key} must be {least} or more")
+    return value
+
+
+def _share(value, where: str, key: str) -> float:
+    if isinstance(value, str):
+        share = _percent(value, where, key)
+    elif isinstance(value, int | float) and not isinstance(value, bool):
+        share = float(value)
+    else:
+        raise ConfigError(f'{where} {key} must be a share such as 0.2 or "20%"')
+    if not 0 <= share <= 1:
+        raise ConfigError(f'{where} {key} must be between 0 and 1 (or "0%" and "100%")')
+    return share
+
+
+def _of(table: dict, key: str, default, kind: type, where: str, what: str):
+    value = table.get(key, default)
+    if not isinstance(value, kind):
+        raise ConfigError(f"{where} {key} must be {what}")
+    return value
 
 
 def _flaky(table: dict, where: str) -> FlakyConfig:
@@ -183,20 +212,19 @@ def _flaky(table: dict, where: str) -> FlakyConfig:
         w,
     )
     d = FlakyConfig()
-    share = table.get("reach-share", d.reach_share)
     flaky = FlakyConfig(
-        retries=int(table.get("retries", d.retries)),
-        machine_threshold=int(table.get("machine-threshold", d.machine_threshold)),
-        store=table.get("store", d.store),
-        label=table.get("label", d.label),
-        mark=table.get("mark", d.mark),
-        flagged=table.get("flagged", d.flagged),
-        unflag_after=int(table.get("unflag-after", d.unflag_after)),
-        reach_share=_percent(share, w, "reach-share") if isinstance(share, str) else float(share),
-        forgive_reached=bool(table.get("forgive-reached", d.forgive_reached)),
+        retries=_int(table.get("retries", d.retries), w, "retries", 0),
+        machine_threshold=_int(
+            table.get("machine-threshold", d.machine_threshold), w, "machine-threshold", 1
+        ),
+        store=_of(table, "store", d.store, str, w, "a string"),
+        label=_of(table, "label", d.label, str, w, "a string"),
+        mark=_of(table, "mark", d.mark, str, w, "a string"),
+        flagged=_of(table, "flagged", d.flagged, str, w, "a string"),
+        unflag_after=_int(table.get("unflag-after", d.unflag_after), w, "unflag-after", 0),
+        reach_share=_share(table.get("reach-share", d.reach_share), w, "reach-share"),
+        forgive_reached=_of(table, "forgive-reached", d.forgive_reached, bool, w, "true or false"),
     )
-    if flaky.retries < 0:
-        raise ConfigError(f"{w} retries must be 0 or more")
     if flaky.store not in ("issues", "marks", "both"):
         raise ConfigError(f'{w} store must be "issues", "marks" or "both"')
     if flaky.flagged not in ("run", "skip"):
