@@ -3,11 +3,11 @@
 Run, in each case, only the checks and tests a change can break, cheapest
 first, and stop at the first failure.
 
-fastci was called testmap up to 0.1.0. It is not on PyPI yet, so it runs from
+fastci was called testmap up to 0.1.0. It is not on PyPI yet, so it installs from
 its git tag:
 
 ```bash
-alias fastci='uvx --from git+https://github.com/syalia-srl/fastci@v0.2.0 fastci'
+uv tool install git+https://github.com/syalia-srl/fastci@v0.2.1   # once; CI uses uvx
 fastci setup          # propose the config, the workflow and the test marks
 fastci setup --write  # apply them
 fastci                # run what this case needs

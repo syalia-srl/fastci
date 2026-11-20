@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- `fastci map record --source` ran pytest with fastci's own interpreter, not
+  the project's: without the project's dependencies or pytest-xdist the run
+  failed and wrote an empty map. It now goes through the adapter, as without
+  `--source`.
+- An empty map counts as no map: every test runs, and fastci says why. Before,
+  a pull request picked nothing from it.
+- `fastci --version`.
+
 ## 0.2.0
 
 testmap is now fastci.
