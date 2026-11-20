@@ -75,12 +75,12 @@ def green_shas(
     return [run["head_sha"] for run in runs if str(run["id"]) != exclude_run]
 
 
-def _download(url: str, token: str, out: str) -> None:
+def _download(url: str, token: str, out: str, suffix: str = ".json.gz") -> None:
     first = _get(url, token, follow=False)
     location = first.headers.get("Location")
     data = urllib.request.urlopen(location, timeout=120).read() if location else first.read()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        member = next(n for n in z.namelist() if n.endswith(".json.gz"))
+        member = next(n for n in z.namelist() if n.endswith(suffix))
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         with open(out, "wb") as f:
             f.write(z.read(member))

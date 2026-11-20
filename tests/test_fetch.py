@@ -97,3 +97,22 @@ def test_green_shas_asks_for_this_workflows_runs_and_skips_this_run(monkeypatch)
 def test_green_shas_empty_without_runs(monkeypatch):
     _runs(monkeypatch, [])
     assert fetch.green_shas("o/r", "main", "fastci.yml", "t", None) == []
+
+
+def test_download_extracts_the_member_with_the_suffix(monkeypatch, tmp_path):
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("map.json.gz", b"map")
+        z.writestr("flaky.json", b'{"version": 1}')
+
+    class R(io.BytesIO):
+        headers = {}
+
+    monkeypatch.setattr(fetch, "_get", lambda url, token, follow=True: R(buf.getvalue()))
+    out = tmp_path / "x" / "flaky.json"
+    fetch._download("u", "t", str(out), suffix=".json")
+    assert out.read_bytes() == b'{"version": 1}'
+    fetch._download("u", "t", str(tmp_path / "map.gz"))
+    assert (tmp_path / "map.gz").read_bytes() == b"map"
