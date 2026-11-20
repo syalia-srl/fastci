@@ -16,7 +16,14 @@ testmap is now fastci.
 - Config in `[tool.fastci]` or `fastci.toml`; `[tool.testmap]` still read.
   Each tier is a table under `[tool.fastci.tiers]`: change any key of a default
   tier, or add your own.
-- Releases publish to PyPI.
+- The book: a Quick Start, a User Guide and a Developer Guide, every command in
+  it run when it is built, published at https://syalia-srl.github.io/fastci/
+  with a PDF.
+- fastci is not on PyPI yet: it runs as
+  `uvx --from git+https://github.com/syalia-srl/fastci@v0.2.0 fastci`, and the
+  workflow `fastci setup` writes does the same. The release workflow can publish
+  to PyPI once the repository variable `PYPI_PUBLISH` is `true`.
+- A project without uv runs its tests with `python3` when there is no `python`.
 - The map is version 2 (records peak memory); version 1 maps still load.
 - Migration: `testmap record|pick|run|fetch` are `fastci map record|pick|run|fetch`;
   `testmap run` in CI becomes `fastci`. Maps uploaded as `testmap` are still fetched.
