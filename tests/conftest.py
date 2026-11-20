@@ -23,6 +23,7 @@ def _no_outer_fastci_run(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     github = ("GITHUB_REPOSITORY", "GH_TOKEN", "GITHUB_TOKEN")
     github += ("GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_BASE_REF")
+    github += ("GITHUB_EVENT_PATH", "GITHUB_SHA")
     for k in github:
         monkeypatch.delenv(k, raising=False)
 

@@ -135,6 +135,7 @@ def on_main(sample, tmp_path, monkeypatch):
         monkeypatch.delenv(k)
     monkeypatch.setenv("CI", "true")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_REF_NAME", "main")
     monkeypatch.setenv("GITHUB_WORKFLOW_REF", "o/r/.github/workflows/fastci.yml@refs/heads/main")

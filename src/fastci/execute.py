@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from . import fetch, issues, results
 from .adapter import Adapter, Project
@@ -92,8 +92,9 @@ def execute(
 INDENT = "\n" + " " * 10
 
 
-def say_verdict(v: Verdict, store: str, since: str = "") -> None:
-    """``since``: on main, the last green run's sha the judged diff starts at."""
+def say_verdict(v: Verdict, store: str, since: str = "", notes: Sequence[str] = ()) -> None:
+    """``since``: on main, the last green run's sha the judged diff starts at; ``notes``:
+    the flag's lines, which close the verdict's block."""
     if v.kind == "crashed":
         how = f" with {v.why}" if v.why else ""
         lines = [f"killed its process{how}: a fault in the code or the machine, not a flake"]
@@ -119,7 +120,7 @@ def say_verdict(v: Verdict, store: str, since: str = "") -> None:
             f"failed, then passed; {nothing}",
             "passed in a fresh process: it may depend on test order",
         ]
-    say(INDENT.join([v.id, *lines]))
+    say(INDENT.join([v.id, *lines, *notes]))
 
 
 def _signal_name(code: int) -> str:
@@ -165,9 +166,10 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
             code = adapter.run_tests(project, root, sel, a, {**env, "FASTCI_RESULTS": path}, wrap)
             return code, path
 
-        def flag(verdicts, res):
+        def flag(verdicts, res) -> dict[str, list[str]]:
             if flaky.flagger is not None and res is not None:
-                flaky.flagger.after(verdicts, res, flaky.reach)
+                return flaky.flagger.after(verdicts, res, flaky.reach)
+            return {}
 
         while True:
             env = dict(base)
@@ -213,13 +215,14 @@ def _judged(adapter, project, root, select, args, wrap, flaky: FlakyRun, cap_not
                     " this looks like the machine, not the code"
                 )
             how = _signal_name(code)
+            notes = flag(verdicts, res)
             for v in verdicts:
                 say_verdict(
                     dataclasses.replace(v, why=how) if v.kind == "crashed" else v,
                     flaky.cfg.store,
                     flaky.reach.since,
+                    notes.get(v.id, []),
                 )
-            flag(verdicts, res)
             if any(v.blocks for v in verdicts):
                 return code
             if not res.explained:
@@ -240,18 +243,33 @@ class Flagger:
     changes a verdict: a failure costs one line here and one in ``lines``."""
 
     def __init__(
-        self, cfg: FlakyConfig, ctx: Context, root: str, repo: str | None, token: str | None
+        self,
+        cfg: FlakyConfig,
+        ctx: Context,
+        root: str,
+        repo: str | None,
+        token: str | None,
+        default_branch: str = "main",
     ):
         self.cfg, self.ctx, self.root, self.repo, self.token = cfg, ctx, root, repo, token
+        self.default_branch = default_branch
         self.lines: list[str] = []  # what goes to the job summary
         self.issues: dict[str, issues.Issue] | None = None  # None: not read
         self.history: History | None = None  # on main only
         self.laptop = ctx.spec.capped
-        self.main = ctx.tier == "main" and not self.laptop
-        m = re.fullmatch(r"refs/pull/(\d+)/merge", os.environ.get("GITHUB_REF", ""))
-        self.pr = m.group(1) if m and not self.laptop else None
-        self.sha = os.environ.get("GITHUB_SHA", "")
-        self.run = os.environ.get("GITHUB_RUN_ID", "")
+        env = os.environ
+        ref = env.get("GITHUB_REF", "")
+        ci = ctx.ci and not self.laptop
+        # Main is the push to the default branch: it writes the history and the bodies.
+        push = env.get("GITHUB_EVENT_NAME") == "push"
+        self.main = ci and push and ref == f"refs/heads/{default_branch}"
+        # Anywhere else in CI a flake adds an occurrence: "#7" on a pull request, else the ref.
+        m = re.fullmatch(r"refs/pull/(\d+)/merge", ref)
+        where = f"#{m.group(1)}" if m else env.get("GITHUB_REF_NAME") or ref
+        self.where = where if ci and not self.main else None
+        self.sha = env.get("GITHUB_SHA", "")
+        self.head = (_head_sha() if m else None) or self.sha  # the merge commit is no reader's
+        self.run = env.get("GITHUB_RUN_ID", "")
 
     def _say(self, line: str) -> None:
         say(line)
@@ -301,9 +319,8 @@ class Flagger:
         if not (self.repo and self.token):
             self._say("could not fetch the flaky history: no GitHub repository or token")
             return History()
-        branch = os.environ.get("GITHUB_REF_NAME", "main")
         try:
-            art = fetch.newest_artifact(self.repo, "fastci-flaky", branch, self.token)
+            art = fetch.newest_artifact(self.repo, "fastci-flaky", self.default_branch, self.token)
             if art is not None:
                 fetch._download(art["archive_download_url"], self.token, path, "flaky.json")
         except Exception as e:
@@ -312,19 +329,30 @@ class Flagger:
             return History()
         return History.load(path)
 
-    def after(self, verdicts: list[Verdict], res: results.Results, reach: Reach) -> None:
-        """Flag each test the verdicts forgave; on main, add this run to the history."""
+    def after(
+        self, verdicts: list[Verdict], res: results.Results, reach: Reach
+    ) -> dict[str, list[str]]:
+        """Flag each test the verdicts forgave; on main, add this run to the history.
+        Returns the lines that close each forgiven test's verdict block."""
         flaky = [v.id for v in verdicts if v.kind == "flaky"]
         changed = self._record(flaky, res) if self.history is not None else set()
+        notes: dict[str, list[str]] = {}
         for id in flaky:
+            notes[id] = []
             if self.laptop:
-                later = "failed and then passed; CI will flag it if it does the same there"
-                say(f"{id}{INDENT}{later}")
+                notes[id].append(
+                    "failed and then passed; CI will flag it if it does the same there"
+                )
                 continue
-            number = self._write(id) if self.cfg.store in ("issues", "both") else None
+            number = None
+            if self.cfg.store in ("issues", "both"):
+                number, line = self._write(id)
+                notes[id] += [line] if line else []
             if self.cfg.store in ("marks", "both"):
                 n = f"#{number}" if number else "#?"
-                self._say(f'add @pytest.mark.{self.cfg.mark}("{n}") to {id}')
+                line = f'add @pytest.mark.{self.cfg.mark}("{n}") to {id}'
+                notes[id].append(line)
+                self.lines.append(line)
         for id in sorted(changed):
             issue = (self.issues or {}).get(id)
             if issue is not None and issue.open and self.history is not None:
@@ -335,6 +363,7 @@ class Flagger:
                     self._say(f"could not write the flag for {id}: {e}")
         if self.history is not None:
             self.history.save(os.path.join(self.root, HISTORY))
+        return notes
 
     def _record(self, flaky: list[str], res: results.Results) -> set[str]:
         """Add the flagged tests' outcomes and the flakes to the history: the
@@ -356,14 +385,16 @@ class Flagger:
     def _where(self, id: str, res: results.Results, date: str) -> dict:
         return {"sha": self.sha, "run": self.run, "date": date, "error": res.errors.get(id, "")}
 
-    def _write(self, id: str) -> int | None:
-        """Open, reopen, rewrite or comment on the test's issue: its number, or None."""
+    def _write(self, id: str) -> tuple[int | None, str]:
+        """Open, reopen, rewrite or comment on the test's issue: its number, or None, and
+        the line for the verdict's block."""
         if self.issues is None:
-            self._say(f"could not write the flag for {id}: the flaky issues could not be read")
-            return None
+            line = f"could not write the flag for {id}: the flaky issues could not be read"
+            self.lines.append(line)
+            return None, line
         issue = self.issues.get(id)
-        if not (self.main or self.pr):
-            return issue.number if issue else None
+        if not (self.main or self.where):  # not in CI: nothing to write
+            return (issue.number, "") if issue else (None, "")
         repo, token = self.repo, self.token
         try:
             entry = self.history.tests[id] if self.history is not None else Entry()
@@ -379,14 +410,27 @@ class Flagger:
             self.issues[id] = issues.Issue(number, True)
             if self.history is not None:
                 entry.issue = number
-            if self.pr:
-                when = f"Failed and then passed on #{self.pr} at {self.sha[:7]} (run {self.run})."
+            if self.where:
+                when = (
+                    f"Failed and then passed on {self.where} at {self.head[:7]} (run {self.run})."
+                )
                 issues.comment(repo, token, number, when)
         except Exception as e:
-            self._say(f"could not write the flag for {id}: {e}")
-            return issue.number if issue else None
-        self._say(f"{id}{INDENT}flagged as flaky: #{number}{how}")
-        return number
+            line = f"could not write the flag for {id}: {e}"
+            self.lines.append(line)
+            return issue.number if issue else None, line
+        line = f"flagged as flaky: #{number}{how}"
+        self.lines.append(f"{id}: {line}")
+        return number, line
+
+
+def _head_sha() -> str | None:
+    """The pull request's head commit, from the event payload."""
+    try:
+        with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
+            return json.load(f)["pull_request"]["head"]["sha"]
+    except (KeyError, OSError, ValueError, TypeError):
+        return None
 
 
 def repo_from_url(url: str) -> str | None:

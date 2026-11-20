@@ -1,6 +1,7 @@
 import gzip
 import io
 import json
+import os
 import urllib.error
 import zipfile
 
@@ -398,16 +399,20 @@ class FakeIssues:
         return [c for c in self.calls if c[0] != "listed"]
 
 
-def in_ci(monkeypatch, ref):
+def in_ci(monkeypatch, ref, event=None):
+    """A GitHub Actions run on ``ref``: a push, or a pull_request on refs/pull/."""
+    pull = ref.startswith("refs/pull/")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event or ("pull_request" if pull else "push"))
     monkeypatch.setenv("GITHUB_REF", ref)
     monkeypatch.setenv("GITHUB_SHA", SHA)
     monkeypatch.setenv("GITHUB_RUN_ID", "4519")
-    monkeypatch.setenv("GITHUB_REF_NAME", "main" if ref == "refs/heads/main" else "7/merge")
+    monkeypatch.setenv("GITHUB_REF_NAME", ref.split("/", 2)[2])
 
 
-def flagger(tmp_path, tier="pr", token="t", **cfg):
-    ctx = detect({}, "main", default_tiers(), tier)
-    return ex.Flagger(FlakyConfig(**cfg), ctx, str(tmp_path), "o/r", token)
+def flagger(tmp_path, tier="pr", token="t", default_branch="main", **cfg):
+    ctx = detect(dict(os.environ), default_branch, default_tiers(), tier)
+    return ex.Flagger(FlakyConfig(**cfg), ctx, str(tmp_path), "o/r", token, default_branch)
 
 
 def flake():
@@ -431,7 +436,60 @@ def test_a_flake_on_a_pull_request_opens_an_issue_and_comments(monkeypatch, tmp_
     assert issues.marker("t::a") in body.splitlines()
     assert comment == ("comment", 41, "Failed and then passed on #7 at a1b2c3d (run 4519).")
     assert a.envs[0]["FASTCI_FLAKY_MARK"] == "quarantine"
-    assert "t::a\n          flagged as flaky: #41 (new)" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # The flag line closes the verdict's own block, as in the spec's "What a run prints".
+    block = ex.INDENT.join(
+        [
+            "fastci: t::a",
+            "failed, then passed; this change does not reach it",
+            "passed in a fresh process: it may depend on test order",
+            "flagged as flaky: #41 (new)",
+        ]
+    )
+    assert block in err and err.count("fastci: t::a") == 1
+
+
+def test_a_pull_request_comment_cites_the_head_commit(monkeypatch, tmp_path):
+    gh = FakeIssues(monkeypatch, {"t::a": issues.Issue(18, True)})
+    in_ci(monkeypatch, "refs/pull/7/merge")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"head": {"sha": "f00ba12" + "0" * 33}}}))
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    run_flagged(flagger(tmp_path))
+    assert gh.writes() == [("comment", 18, "Failed and then passed on #7 at f00ba12 (run 4519).")]
+
+
+@pytest.mark.parametrize(
+    "ref,event,where",
+    [
+        ("refs/heads/release/1.2", "push", "release/1.2"),
+        ("refs/tags/v1.2.0", "push", "v1.2.0"),
+        # main, but not its push: a schedule writes neither the history nor the body.
+        ("refs/heads/main", "schedule", "main"),
+    ],
+)
+def test_off_the_default_push_a_flake_opens_its_issue_and_comments(
+    monkeypatch, tmp_path, capsys, ref, event, where
+):
+    gh = FakeIssues(monkeypatch)
+    in_ci(monkeypatch, ref, event)
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: pytest.fail("fetched"))
+    code, _ = run_flagged(flagger(tmp_path, tier="release"))
+    assert code == 0
+    assert [c[0] for c in gh.writes()] == ["open_issue", "comment"]
+    text = f"Failed and then passed on {where} at a1b2c3d (run 4519)."
+    assert gh.writes()[1] == ("comment", 41, text)
+    assert "flagged as flaky: #41 (new)" in capsys.readouterr().err
+    assert not (tmp_path / HISTORY).exists()
+
+
+def test_main_is_the_push_to_the_default_branch_whatever_the_tier(monkeypatch, tmp_path):
+    gh = FakeIssues(monkeypatch)
+    in_ci(monkeypatch, "refs/heads/trunk")
+    monkeypatch.setattr(fetch, "newest_artifact", lambda *a, **k: None)
+    run_flagged(flagger(tmp_path, tier="release", default_branch="trunk"))
+    assert [c[0] for c in gh.writes()] == ["open_issue"]
+    assert History.load(tmp_path / HISTORY).tests["t::a"].main == [1]
 
 
 def test_a_second_flake_of_a_flagged_test_only_comments(monkeypatch, tmp_path):
@@ -475,8 +533,8 @@ def history_artifact(monkeypatch, history, member="flaky.json"):
     return asked
 
 
-def test_on_main_a_flake_writes_the_body_and_the_history(monkeypatch, tmp_path):
-    gh = FakeIssues(monkeypatch, {"t::a": issues.Issue(18, True), "t::f": issues.Issue(5, True)})
+def test_on_main_a_flake_opens_its_issue_and_writes_the_history(monkeypatch, tmp_path):
+    gh = FakeIssues(monkeypatch, {"t::f": issues.Issue(5, True)})
     in_ci(monkeypatch, "refs/heads/main")
     old = {"version": 1, "tests": {"t::f": {"main": [1, 0]}}}
     asked = history_artifact(monkeypatch, old)
@@ -487,10 +545,10 @@ def test_on_main_a_flake_writes_the_body_and_the_history(monkeypatch, tmp_path):
     h = History.load(tmp_path / HISTORY)
     assert h.tests["t::a"].main == [1] and h.tests["t::a"].last_failure["sha"] == SHA
     assert h.tests["t::f"].main == [1, 0, 0]
-    edits = {c[1]: c[2] for c in gh.writes() if c[0] == "edit"}
-    assert set(edits) == {18, 5} and [c[0] for c in gh.writes()] == ["edit", "edit"]
-    assert edits[18] == issues.body("t::a", h.tests["t::a"], 20)
-    assert "| main, last 3 | 3 | 1 | 33% |" in edits[5]
+    assert h.tests["t::a"].issue == 41
+    [opened, edited] = gh.writes()
+    assert opened == ("open_issue", "flaky", "t::a", issues.body("t::a", h.tests["t::a"], 20))
+    assert edited[:2] == ("edit", 5) and "| main, last 3 | 3 | 1 | 33% |" in edited[2]
 
 
 def flagged_outcome(t, result, number):
@@ -537,7 +595,7 @@ def test_with_marks_nothing_is_called_and_the_mark_line_prints(monkeypatch, tmp_
     assert code == 0 and gh.calls == []
     assert "FASTCI_FLAGGED" not in a.envs[0] and a.envs[0]["FASTCI_FLAKY_MARK"] == "quarantine"
     line = 'add @pytest.mark.quarantine("#?") to t::a'
-    assert f"fastci: {line}" in capsys.readouterr().err and line in f.lines
+    assert f"{ex.INDENT}{line}" in capsys.readouterr().err and line in f.lines
 
 
 def test_with_both_the_mark_line_names_the_issue(monkeypatch, tmp_path, capsys):
@@ -559,7 +617,7 @@ def test_a_refused_write_leaves_the_verdict(monkeypatch, tmp_path, capsys):
     code, _ = run_flagged(f)
     assert code == 0
     line = "could not write the flag for t::a: HTTP Error 403: Forbidden"
-    assert f"fastci: {line}" in capsys.readouterr().err and f.lines == [line]
+    assert f"{ex.INDENT}{line}" in capsys.readouterr().err and f.lines == [line]
 
 
 def test_issues_that_cannot_be_read_write_nothing(monkeypatch, tmp_path, capsys):
@@ -583,7 +641,7 @@ def test_a_laptop_never_writes_and_reads_its_copy_when_offline(monkeypatch, tmp_
         assert json.load(f) == {"t::f": 5}
     err = capsys.readouterr().err
     later = "failed and then passed; CI will flag it if it does the same there"
-    assert f"t::a\n          {later}" in err
+    assert f"order{ex.INDENT}{later}" in err and err.count("fastci: t::a") == 1
     assert not (tmp_path / HISTORY).exists()
 
 

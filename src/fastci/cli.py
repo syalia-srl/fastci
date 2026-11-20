@@ -225,7 +225,7 @@ def _run(args) -> int:
             cfg.flaky,
             cfg.retries_for(ctx.tier),
             reach,
-            Flagger(cfg.flaky, ctx, root, repo_of(root), _token(ctx)),
+            Flagger(cfg.flaky, ctx, root, repo_of(root), _token(ctx), cfg.default_branch),
         ),
     )
 
