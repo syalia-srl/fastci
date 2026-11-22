@@ -127,7 +127,7 @@ code,pre{overflow-wrap:anywhere;font-variant-ligatures:none}
 
 <div class="kv">
 <b>goal</b><span>An agent runs <code>fastci report</code> before a release and gets ranked findings, with numbers, on time, overlap, coverage and flakiness, built from main's maps without running a test; a person gets the same data as one HTML page.</span>
-<b>architecture</b><span>The plugin and the recorder write three new kinds of data into the map (lines run outside tests, executable lines, per-test phases, fixture runs, child processes, the lane). A new package <code>fastci.report</code> turns one or more maps, the source tree and the flaky history into a plain dict of sections; three renderers print it as text, JSON and HTML.</span>
+<b>architecture</b><span>The plugin and the recorder write new data into the map: lines run outside tests, executable lines, per-test phases, fixture runs, child processes and the lane. A new package <code>fastci.report</code> turns one or more maps, the source tree and the flaky history into a plain dict of sections; three renderers print it as text, JSON and HTML.</span>
 <b>stack</b><span>Python 3.11+, pytest hooks, coverage's <code>CoverageData</code> and <code>PythonParser</code>, the stdlib. No new dependency.</span>
 <b>spec</b><span><a href="../specs/2026-11-22-suite-health-design.html">docs/superpowers/specs/2026-11-22-suite-health-design.html</a></span>
 <b>branches</b><span>Slice 1, map v3: tasks 1 to 3, branch <code>health/map-v3</code>, then a release. Slice 2, the report: tasks 4 to 7, <code>health/report</code>. Slice 3, page and docs: tasks 8 to 10, <code>health/page</code>, then a release. Each slice is one PR from its own worktree off <code>main</code>, after the previous one merged.</span>
