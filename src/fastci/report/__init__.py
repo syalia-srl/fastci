@@ -73,7 +73,7 @@ class Suite:
 
 def build(suite: Suite, history=None, top: int = TOP) -> dict:
     """The whole report as a dict. ``top`` is for the renderers; the model keeps every entry."""
-    from . import time
+    from . import overlap, time
 
     return {
         "version": 1,
@@ -85,7 +85,11 @@ def build(suite: Suite, history=None, top: int = TOP) -> dict:
             "by_test_file": time.by_test_file(suite),
             "always_cost": time.always_cost(suite),
         },
-        "overlap": {},
+        "overlap": {
+            "same_path": overlap.same_path(suite),
+            "near_same": overlap.near_same(suite),
+            "startup_path": overlap.startup_path(suite),
+        },
         "coverage": {},
         "flaky": section(),
     }
