@@ -109,13 +109,19 @@ if RECORD:
         _requested[item.nodeid] = [
             [d[-1].argname, d[-1].scope, d[-1].baseid]
             for name in getattr(item, "fixturenames", ())
-            if (d := defs.get(name))
+            if (d := defs.get(name)) and not _pseudo(d[-1])
         ]
+
+    def _pseudo(fixturedef) -> bool:
+        """The fixture pytest makes for a direct ``parametrize`` argument: no set-up."""
+        return getattr(fixturedef.func, "__name__", "") == "get_direct_param_fixture_func"
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(fixturedef, request):
         start = time.perf_counter()
         yield
+        if _pseudo(fixturedef):
+            return
         seconds = time.perf_counter() - start
         test = _state["test"] or getattr(request.node, "nodeid", "")
         _fixture_runs.append(

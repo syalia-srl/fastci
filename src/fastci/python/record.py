@@ -140,7 +140,7 @@ def build(work: str, data: str, root: str, sources: list[str] | None = None) -> 
             reads.setdefault(p, set()).add(idx(t))
 
     tm = TestMap(
-        sha=git(root, "rev-parse", "HEAD"),
+        sha=git(root, "rev-parse", "--verify", "-q", "HEAD"),
         tests=tests,
         durations=[durations.get(t, 0.0) for t in tests],
         always={index[t] for t in always if t in index},
@@ -179,7 +179,7 @@ class _Notes:
         self.spawns.update(d.get("spawns", []))
         self.deselected.update(d.get("deselected", []))
         self.skipped.update(d.get("skipped", {}))
-        self.args = d.get("args") or self.args
+        self.args = _own_args(d.get("args") or []) or self.args
 
     def fill(self, tm: TestMap, idx) -> None:
         table: dict[tuple, int] = {}
@@ -206,6 +206,19 @@ class _Notes:
             "deselected": sorted(self.deselected),
             "skipped": dict(sorted(self.skipped.items())),
         }
+
+
+def _own_args(args: list[str]) -> list[str]:
+    """The pytest arguments without the plugin and coverage ones the recorder adds."""
+    out: list[str] = []
+    for a in args:
+        if a.startswith("--cov"):
+            continue
+        if a == "fastci.python.plugin" and out and out[-1] == "-p":
+            out.pop()
+            continue
+        out.append(a)
+    return out
 
 
 OMIT = ("tests", ".venv", "site-packages", "node_modules", ".git")

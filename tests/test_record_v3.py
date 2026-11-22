@@ -119,3 +119,13 @@ def test_the_plugins_notes_reach_the_map(health_map):
     assert tm.lane["skipped"] == {"tests/test_lane.py::test_skip": "needs a gpu"}
     warm = [k for k, f in enumerate(tm.fixtures) if f[0] == "warm"]
     assert len(warm) == 1 and sum(1 for r in tm.fixture_runs if r[0] == warm[0]) == 3
+
+
+def test_the_lane_keeps_only_the_users_pytest_arguments(health_map):
+    _, tm = health_map
+    assert tm.lane["args"] == ["-q", "-p", "no:cacheprovider", "-m", "not slow"]
+
+
+def test_a_parametrize_argument_is_not_a_fixture(health_map):
+    _, tm = health_map
+    assert "n" not in {f[0] for f in tm.fixtures}
