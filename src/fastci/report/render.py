@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import json
 
 # (group, key, title, what the section points to)
@@ -77,10 +78,12 @@ def _entry(key: str, e: dict) -> list[str]:
     if key == "slowest":
         cases = f" ({e['cases']} cases)" if e["cases"] > 1 else ""
         marks = f" [{', '.join(e['marks'])}]" if e["marks"] else ""
-        return [
-            f"{_s(e['seconds'])}  {_pct(e['share'])}  set-up {e['setup']:.2f} / call "
-            f"{e['call']:.2f} / teardown {e['teardown']:.2f}  {e['test']}{cases}{marks}"
-        ]
+        phases = ""
+        if e["setup"] is not None:
+            phases = (
+                f"  set-up {e['setup']:.2f} / call {e['call']:.2f} / teardown {e['teardown']:.2f}"
+            )
+        return [f"{_s(e['seconds'])}  {_pct(e['share'])}{phases}  {e['test']}{cases}{marks}"]
     if key == "little_code":
         sp = ", started a child process" if e["spawns"] else ""
         return [f"{_s(e['call'])} in call over {e['lines']} lines run{sp}  {e['test']}"]
@@ -195,3 +198,235 @@ def text(model: dict, top: int) -> str:
         for e in sec["entries"][:top]:
             out += _entry(key, e)
     return "\n".join(out) + "\n"
+
+
+def _e(x) -> str:
+    return _html.escape(str(x))
+
+
+def _num(x, fmt="{:.2f}") -> str:
+    return f'<td class="n" data-v="{x}">{_e(fmt.format(x))}</td>'
+
+
+def _td(label: str, value: str, cls: str = "", sort=None) -> str:
+    c = f' class="{cls}"' if cls else ""
+    v = f' data-v="{sort}"' if sort is not None else ""
+    return f'<td{c}{v} data-label="{_e(label)}">{value}</td>'
+
+
+def _n(label: str, x, fmt: str = "{:.2f}") -> str:
+    if x is None:
+        return _td(label, "-", "n", -1)
+    return _td(label, _e(fmt.format(x)), "n", x)
+
+
+def _id(label: str, value: str) -> str:
+    return _td(label, value, "id")
+
+
+def _tags(tags) -> str:
+    return "".join(f'<span class="tag">{_e(t)}</span>' for t in tags)
+
+
+def _sub(text: str) -> str:
+    return f'<br><span class="sub">{_e(text)}</span>'
+
+
+def _cases(t: dict) -> str:
+    n = t.get("cases", 1)
+    return f' <span class="sub">({n} cases)</span>' if n > 1 else ""
+
+
+def _row_setup_cost(e):
+    return [
+        _n("seconds", e["seconds"]),
+        _id("fixture", _e(e["fixture"])),
+        _td("scope", _e(e["scope"])),
+        _td("defined in", _e(e["defined_in"] or "root")),
+        _n("runs", e["runs"], "{}"),
+        _n("tests", e["tests"], "{}"),
+        _n("rebuilt", e["rebuilt"], "{}"),
+    ]
+
+
+def _row_slowest(e):
+    return [
+        _n("seconds", e["seconds"]),
+        _n("share", 100 * e["share"], "{:.1f}%"),
+        _n("set-up", e["setup"]),
+        _n("call", e["call"]),
+        _n("teardown", e["teardown"]),
+        _id("test", _e(e["test"]) + _cases(e) + _tags(e["marks"])),
+    ]
+
+
+def _row_little_code(e):
+    return [
+        _n("call", e["call"]),
+        _n("lines run", e["lines"], "{}"),
+        _id("test", _e(e["test"]) + _tags(["spawns"] if e["spawns"] else [])),
+    ]
+
+
+def _row_by_test_file(e):
+    return [
+        _n("seconds", e["seconds"]),
+        _n("share", 100 * e["share"], "{:.1f}%"),
+        _n("floor", e["floor"]),
+        _n("tests", e["tests"], "{}"),
+        _id("file", _e(e["file"])),
+    ]
+
+
+def _row_always_cost(e):
+    return [_n("seconds", e["seconds"]), _id("test", _e(e["test"]))]
+
+
+def _row_same_path(e):
+    tests = "<br>".join(_e(t["test"]) + _cases(t) for t in e["tests"])
+    if e["fixtures"]:
+        tests += _sub("all request " + ", ".join(e["fixtures"]))
+    return [
+        _n("beyond fastest", e["beyond_fastest"]),
+        _n("seconds", e["seconds"]),
+        _n("own lines", e["own_lines"], "{}"),
+        _n("files", e["files"], "{}"),
+        _id("tests", tests),
+    ]
+
+
+def _row_near_same(e):
+    tests = "<br>".join(
+        f'{_e(t["test"])} <span class="sub">+{t["adds"]}</span>' for t in e["tests"]
+    )
+    return [
+        _n("seconds", e["seconds"]),
+        _n("common lines", e["core"], "{}"),
+        _id("file", _e(e["file"])),
+        _id("tests", tests),
+    ]
+
+
+def _row_startup_path(e):
+    return [
+        _n("tests", e["tests"], "{}"),
+        _n("seconds", e["seconds"]),
+        _n("median", e["median"], "{:.3f}"),
+        _id("functions", "<br>".join(_e(f) for f in e["functions"])),
+    ]
+
+
+def _row_by_file(e):
+    width = max(2, round(e["percent"] * 0.6))
+    lo = " lo" if e["percent"] < 50 else ""
+    bar = f'<span class="bar{lo}" style="width:{width}px"></span>{e["percent"]}%'
+    if e["untested"] is None:
+        extra = _sub("changed since the map")
+    else:
+        extra = "".join(
+            _sub(f"untested: {u['function']} ({u['lines']} lines)") for u in e["untested"]
+        )
+    return [
+        _td("coverage", bar, "n", e["percent"]),
+        _td("run / lines", f"{e['run']} / {e['lines']}", "n", e["lines"] - e["run"]),
+        _n("tests", e["tests"], "{}"),
+        _id("file", _e(e["file"]) + _tags(e["tags"]) + extra),
+    ]
+
+
+def _row_never_imported(e):
+    return [
+        _n("lines", e["lines"], "{}"),
+        _td("kind", "script" if e["script"] else "module"),
+        _id("file", _e(e["file"])),
+    ]
+
+
+def _row_flaky(e):
+    return [
+        _n("rate", 100 * e["rate"], "{:.1f}%"),
+        _td("failed / runs", f"{e['failures']} / {e['runs']}", "n", e["rate"]),
+        _td("issue", f"#{e['issue']}" if e["issue"] else ""),
+        _id("test", _e(e["test"])),
+    ]
+
+
+HEADS = {
+    "setup_cost": ["seconds", "fixture", "scope", "defined in", "runs", "tests", "rebuilt"],
+    "slowest": ["seconds", "share", "set-up", "call", "teardown", "test"],
+    "little_code": ["call", "lines run", "test"],
+    "by_test_file": ["seconds", "share", "floor", "tests", "file"],
+    "always_cost": ["seconds", "test"],
+    "same_path": ["beyond fastest", "seconds", "own lines", "files", "tests"],
+    "near_same": ["seconds", "common lines", "file", "tests (+ own lines beyond the common core)"],
+    "startup_path": ["tests", "seconds", "median", "functions"],
+    "by_file": ["coverage", "run / lines", "tests", "file"],
+    "never_imported": ["lines", "kind", "file"],
+    None: ["rate", "failed / runs", "issue", "test"],
+}
+ROWS = {
+    "setup_cost": _row_setup_cost,
+    "slowest": _row_slowest,
+    "little_code": _row_little_code,
+    "by_test_file": _row_by_test_file,
+    "always_cost": _row_always_cost,
+    "same_path": _row_same_path,
+    "near_same": _row_near_same,
+    "startup_path": _row_startup_path,
+    "by_file": _row_by_file,
+    "never_imported": _row_never_imported,
+    None: _row_flaky,
+}
+
+
+def html(model: dict) -> str:
+    from importlib.resources import files
+
+    h = model["header"]
+    sha = (h.get("sha") or "")[:10] or "unknown commit"
+    body = [
+        f"<h1>Suite health · map {_e(sha)}</h1>",
+        f'<p class="meta">{_e((h.get("date") or "")[:10])} · {h["tests"]} tests · '
+        f"{h['seconds']:.2f} s recorded · {h['maps']} map(s)</p>",
+        '<ul class="head">',
+    ]
+    if h.get("head_differs"):
+        body.append("<li>This checkout is not the map's commit: line numbers may have moved.</li>")
+    if h["args"]:
+        body.append(f"<li>Recorded with <code>{_e(' '.join(h['args']))}</code></li>")
+    body.append(f"<li>Deselected when recorded: {h['deselected']}.</li>")
+    body.append(f"<li>Tests that started a child process: {h['spawns']}.</li>")
+    body += [
+        f"<li>Skipped: <code>{_e(s['test'])}</code> ({_e(s['reason'])})</li>" for s in h["skipped"]
+    ]
+    body += [f"<li>Not Python: <code>{_e(f)}</code></li>" for f in h["unparsed"]]
+    body += [f"<li>{_e(n)}</li>" for n in h["notes"]]
+    body.append("</ul>")
+    group_titles = {"time": "Time", "overlap": "Overlap", "coverage": "Coverage", "flaky": "Flaky"}
+    shown = set()
+    for group, key, title, points in SECTIONS:
+        if group not in shown:
+            body.append(f"<h2>{group_titles[group]}</h2>")
+            shown.add(group)
+        sec = model[group] if key is None else model[group].get(key, {})
+        body.append(f"<h3>{_e(title)}</h3>")
+        if sec.get("note"):
+            body.append(f'<p class="note">{_e(sec["note"])}</p>')
+            continue
+        body.append(f'<p class="total">{_e(_total(key, sec))}</p>')
+        body.append(f'<p class="points">points to: {_e(points)}</p>')
+        if not sec["entries"]:
+            continue
+        head = "".join(f"<th>{_e(label)}</th>" for label in HEADS[key])
+        rows = "".join("<tr>" + "".join(ROWS[key](e)) + "</tr>" for e in sec["entries"])
+        body.append(
+            f'<input class="filter" placeholder="filter" aria-label="filter {_e(title)}">'
+            f"<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
+        )
+    page = (files("fastci") / "templates" / "report.html").read_text(encoding="utf-8")
+    data = as_json(model).replace("</", "<\\/")
+    return (
+        page.replace("{{TITLE}}", _e(f"fastci report · {sha}"))
+        .replace("{{MODEL}}", data)
+        .replace("{{BODY}}", "\n".join(body))
+    )

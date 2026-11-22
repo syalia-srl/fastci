@@ -54,3 +54,15 @@ def test_tiny_and_empty_maps_build_every_section_without_error():
 def test_durations_are_the_median_over_several_maps():
     s = synthetic_suite(durations_per_map=[[1.0], [3.0], [2.0]])
     assert s.durations == [2.0]
+
+
+def test_a_version_2_map_still_lists_the_slowest_tests():
+    s = synthetic_suite(durations_per_map=[[2.0, 1.0]])
+    s.tm.phases = []
+    s.tm.version = 2
+    from fastci.report import Suite
+
+    s = Suite(maps=s.maps, root=s.root, reach_share=s.reach_share)
+    sec = slowest(s)
+    assert sec["note"] is None and [e["seconds"] for e in sec["entries"]] == [2.0, 1.0]
+    assert sec["entries"][0]["setup"] is None

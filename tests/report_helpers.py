@@ -56,7 +56,10 @@ def synthetic_suite(
 
 
 def model_with_test(nodeid):
-    return build(synthetic_suite(durations_per_map=[[0.5]]), None) | {}
+    """The model of a one-test suite whose test has the given node id."""
+    s = synthetic_suite(durations_per_map=[[0.5]])
+    s.tm.tests[0] = nodeid
+    return build(Suite(maps=s.maps, root=s.root, reach_share=s.reach_share), None)
 
 
 def copy_repo(repo, dest):

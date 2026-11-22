@@ -77,23 +77,23 @@ def slowest(s: Suite) -> dict:
         )
         e["cases"] += 1
         e["seconds"] += s.durations[i]
-        if s.phases:
-            for k, v in zip(("setup", "call", "teardown"), s.phases[i], strict=True):
-                e[k] += v
+        for k, v in zip(
+            ("setup", "call", "teardown"), s.phases[i] if s.phases else (), strict=False
+        ):
+            e[k] += v
         if i in tm.always and "always" not in e["marks"]:
             e["marks"].append("always")
     out = sorted(by.values(), key=lambda e: -e["seconds"])
     for e in out:
         e["share"] = round(e["seconds"] / s.total, 4) if s.total else 0.0
         for k in ("seconds", "setup", "call", "teardown"):
-            e[k] = round(e[k], 3)
+            e[k] = round(e[k], 3) if s.phases or k == "seconds" else None
     top10 = sum(e["seconds"] for e in out[:10])
     total = {
         "seconds": round(s.total, 3),
         "top10_share": round(top10 / s.total, 4) if s.total else 0,
     }
-    note = None if s.phases else NO_V3.format(what="phases", v=tm.version)
-    return section(out, total, note if s.n else None)
+    return section(out, total)
 
 
 def little_code(s: Suite) -> dict:
