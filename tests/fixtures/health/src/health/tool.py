@@ -1,5 +1,7 @@
 def main():
-    print("tool")
+    from health import lazy
+
+    print("tool", lazy.NAME)
 
 
 if __name__ == "__main__":

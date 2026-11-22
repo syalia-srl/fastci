@@ -18,13 +18,14 @@ NEAR = 0.9  # Jaccard index above which two tests are almost the same
 LITTLE_CODE_MIN_S = 0.5  # call seconds below which a test is never "much time, little code"
 LITTLE_CODE_FACTOR = 10  # times the suite's median seconds per line run
 TOP = 10  # entries per section in the text
+MIN_FIXTURE_S = 0.1  # a fixture whose runs cost less in all is not worth a line
 
 
 def base_id(nodeid: str) -> str:
     """The node id without the parameters of its last part: one id for a test's cases."""
-    head, sep, last = nodeid.rpartition("::")
-    i = last.find("[")
-    return head + sep + (last[:i] if i >= 0 else last)
+    # Parameters start at the first bracket and may hold "::" or brackets themselves.
+    i = nodeid.find("[")
+    return nodeid[:i] if i > 0 and nodeid.endswith("]") else nodeid
 
 
 def section(entries=None, total=None, note=None) -> dict:

@@ -10,6 +10,7 @@ def test_base_id_strips_only_the_last_parts_brackets():
     assert base_id("t.py::test_x[a[1]]") == "t.py::test_x"
     assert base_id("t.py::C::test_y[a b/c]") == "t.py::C::test_y"
     assert base_id("t.py::test_z") == "t.py::test_z"
+    assert base_id("t.py::test_u[tests/t.py::test_u[--!>]]") == "t.py::test_u"
 
 
 def test_a_function_fixture_paid_by_three_tests_tops_setup_cost(health_map):
@@ -66,3 +67,21 @@ def test_a_version_2_map_still_lists_the_slowest_tests():
     sec = slowest(s)
     assert sec["note"] is None and [e["seconds"] for e in sec["entries"]] == [2.0, 1.0]
     assert sec["entries"][0]["setup"] is None
+
+
+def test_tiny_fixtures_are_left_out_and_workers_are_counted():
+    s = synthetic_suite(
+        fixture_runs=[
+            ("tmp_path", "function", "", "t.py::a", "gw0", 0.01),
+            ("db", "module", "", "t.py::a", "gw0", 5.0),
+            ("db", "module", "", "t.py::b", "gw1", 5.0),
+        ]
+    )
+    (e,) = setup_cost(s)["entries"]
+    assert e["fixture"] == "db" and e["workers"] == 2 and e["rebuilt"] == 0
+
+
+def test_a_wider_fixtures_first_run_is_named_in_the_slowest_test():
+    s = synthetic_suite(fixture_runs=[("map", "session", "", "t.py::first", "main", 1.5)])
+    e = {x["test"]: x for x in slowest(s)["entries"]}
+    assert e["t.py::first"]["shared_setup"] == 1.5
