@@ -82,7 +82,7 @@ def build(work: str, data: str, root: str, sources: list[str] | None = None) -> 
     durations: dict[str, float] = {}
     opens: dict[str, set[str]] = {}
     always: set[str] = set()
-    notes = Notes()
+    notes = _Notes()
     for f in glob.glob(os.path.join(work, "tests-*.json")):
         d = json.loads(Path(f).read_text())
         durations.update(d["durations"])
@@ -160,7 +160,7 @@ def build(work: str, data: str, root: str, sources: list[str] | None = None) -> 
     return tm
 
 
-class Notes:
+class _Notes:
     """The plugin's version 3 notes, merged over its tests-*.json files."""
 
     def __init__(self):
