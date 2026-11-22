@@ -19,6 +19,7 @@ files:
   - chapters/07-architecture.md
   - chapters/08-another-language.md
   - chapters/09-flaky-tests.md
+  - chapters/10-suite-health.md
 
 outputs:
   site:

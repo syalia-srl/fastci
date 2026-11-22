@@ -51,6 +51,12 @@ including the adapters, suites and end-to-end maps still to come, is
 - **The issues module** (`fastci.issues`) keeps one GitHub issue per flagged
   test, found by the node id in a marker line of its body, never by title.
 
+- **`fastci.report`**: `fastci report`. Reads one or more maps of the default
+  branch, the source tree and the flaky history, builds a dict of sections
+  (time, overlap, coverage, flaky) and prints it as text, JSON or one HTML page.
+  It reads the map's version 3 fields: lines run outside tests, executable
+  lines, per-test phases, fixture runs, child processes and the lane.
+
 ## Rules and their reasons
 
 - **Functions are matched by name and lines by their text.** The map is
@@ -75,6 +81,14 @@ including the adapters, suites and end-to-end maps still to come, is
   more than that share of tests ran to the tests that name it plus the five
   fastest. On aegis it cut the median from 90% to 65% of the suite's time, and
   without an `always` group for coherence tests it lost real failures.
+
+- **The report gives evidence, never a verdict, and never fails a run.**
+  Coverage cannot see assertions: two tests that run the same lines may check
+  different things. Each finding carries its numbers and the reader decides.
+  Its thresholds (15 own lines for a group, 90% for almost the same, a call of
+  at least 0.5 s for much time and little code) come from judging its findings
+  on five real repositories, and the report reads only the map, so it can be
+  rebuilt in seconds without running a test.
 
 ## What a machine checks and what a reader judges
 

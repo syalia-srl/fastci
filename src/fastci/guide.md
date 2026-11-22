@@ -93,6 +93,19 @@ the cause of the miss:
 - a rule that should have picked the test: open an issue on fastci with the
   change and the test, so the rule gets a fixture case.
 
+## Before a release: read the suite's health
+
+Run `fastci report` (add `--maps 5` for median durations). Read the header
+first: what it says the map cannot see (deselected and skipped tests, tests
+that start child processes) explains findings further down. Then take the
+sections in order: time, overlap, coverage, flaky.
+
+For each finding you act on, read the tests it names. Overlap cannot see what
+a test asserts, and a coverage row tagged `outside the lane` may be covered by
+tests the map did not record. Open one issue per refactor with the report's
+numbers. Every refactor keeps the suite green, and its pull request shows the
+report's numbers before and after.
+
 ## On a laptop
 
 - `[tool.fastci.local] memory = "50%"` caps the whole run at that share of
