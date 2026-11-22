@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The map is version 3. It also records the lines that run outside any test (at
+  import, during collection), the executable lines of every source file, each
+  test's set-up, call and teardown seconds, each fixture run with its seconds
+  and worker, the tests that start a child process, and the lane: the pytest
+  arguments, the deselected and the skipped tests. Older maps still load.
 - A failed test is retried once, serially, in a fresh pytest process on the same
   machine. If it passes, the verdict depends on what the change reaches: a test
   the change does not reach goes green; one it reaches stays red, as do a crash,

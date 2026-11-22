@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -46,6 +48,13 @@ _state: dict = {"test": None, "busy": False}
 _opens: dict[str, set[str]] = {}
 _durations: dict[str, float] = {}
 _always: set[str] = set()
+_phases: dict[str, list[float]] = {}  # set-up, call, teardown seconds
+_requested: dict[str, list[list[str]]] = {}  # [name, scope, baseid] per requested fixture
+_fixture_runs: list[list] = []  # [name, scope, baseid, test, worker, seconds]
+_spawns: set[str] = set()
+_deselected: list[str] = []
+_skipped: dict[str, str] = {}
+PHASE = {"setup": 0, "call": 1, "teardown": 2}
 
 
 def repo_path(path) -> str | None:
@@ -80,14 +89,56 @@ def _audit(event, args):
 if RECORD:
     sys.addaudithook(_audit)
 
+    _popen_init = subprocess.Popen.__init__
+
+    def _popen(self, *args, **kwargs):
+        if _state["test"] is not None:
+            _spawns.add(_state["test"])
+        _popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _popen
+
+    @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_setup(item):
         _state["test"] = item.nodeid
         os.environ["FASTCI_CTX"] = item.nodeid
         if item.get_closest_marker("always"):
             _always.add(item.nodeid)
+        info = getattr(item, "_fixtureinfo", None)
+        defs = getattr(info, "name2fixturedefs", {}) if info else {}
+        _requested[item.nodeid] = [
+            [d[-1].argname, d[-1].scope, d[-1].baseid]
+            for name in getattr(item, "fixturenames", ())
+            if (d := defs.get(name)) and not _pseudo(d[-1])
+        ]
+
+    def _pseudo(fixturedef) -> bool:
+        """The fixture pytest makes for a direct ``parametrize`` argument: no set-up."""
+        return getattr(fixturedef.func, "__name__", "") == "get_direct_param_fixture_func"
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_fixture_setup(fixturedef, request):
+        start = time.perf_counter()
+        yield
+        if _pseudo(fixturedef):
+            return
+        seconds = time.perf_counter() - start
+        test = _state["test"] or getattr(request.node, "nodeid", "")
+        _fixture_runs.append(
+            [fixturedef.argname, fixturedef.scope, fixturedef.baseid, test, _worker["id"], seconds]
+        )
+
+    def pytest_deselected(items):
+        _deselected.extend(i.nodeid for i in items)
 
     def pytest_runtest_logreport(report):
         _durations[report.nodeid] = _durations.get(report.nodeid, 0.0) + report.duration
+        phases = _phases.setdefault(report.nodeid, [0.0, 0.0, 0.0])
+        phases[PHASE[report.when]] += report.duration
+        if report.skipped and report.when in ("setup", "call"):
+            why = report.longrepr
+            why = why[2] if isinstance(why, tuple) and len(why) == 3 else str(why)
+            _skipped[report.nodeid] = why.removeprefix("Skipped: ")
         if report.when == "teardown":
             _state["test"] = None
             os.environ["FASTCI_CTX"] = ""
@@ -95,12 +146,21 @@ if RECORD:
     def pytest_sessionfinish(session):
         os.makedirs(RECORD, exist_ok=True)
         worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+        main = _worker["id"] == "main"
+        args = list(session.config.invocation_params.args) if main else []
         with open(os.path.join(RECORD, f"tests-{worker}.json"), "w") as f:
             json.dump(
                 {
                     "opens": {k: sorted(v) for k, v in _opens.items()},
                     "durations": _durations,
                     "always": sorted(_always),
+                    "phases": _phases,
+                    "requested": _requested,
+                    "fixture_runs": _fixture_runs,
+                    "spawns": sorted(_spawns),
+                    "deselected": _deselected,
+                    "skipped": _skipped,
+                    "args": args,
                 },
                 f,
             )
@@ -125,13 +185,15 @@ else:
 COLLECT = os.environ.get("FASTCI_COLLECT")
 
 
-_worker = {"is": False}
+_worker = {"is": False, "id": "main"}
 
 
 def pytest_configure(config):
     # An xdist worker's config has workerinput; the environment variable also reaches
     # any pytest a worker starts, which is not a worker.
     _worker["is"] = hasattr(config, "workerinput")
+    # From the config, not PYTEST_XDIST_WORKER, which also reaches a pytest a worker starts.
+    _worker["id"] = config.workerinput["workerid"] if _worker["is"] else "main"
     for name, text in MARKS.items():
         config.addinivalue_line("markers", f"{name}: {text}")
 
