@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `fastci` says when a newer release exists and which tag to pin: once a day
+  at most on a laptop, on every run in GitHub Actions as a warning annotation
+  and a line in the job summary. It never fails a run;
+  `FASTCI_NO_VERSION_CHECK=1` turns it off.
+
 ## 0.3.0
 
 - `fastci report`: the suite's health from the default branch's maps, without

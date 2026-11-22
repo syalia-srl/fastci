@@ -62,6 +62,7 @@ FILES = {
 CLEAN = {k: v for k, v in os.environ.items() if k != "CI" and not k.startswith("GITHUB_")}
 CLEAN.pop("VIRTUAL_ENV", None)
 CLEAN["UV_LINK_MODE"] = "copy"
+CLEAN["FASTCI_NO_VERSION_CHECK"] = "1"  # the book reads the same after a new release
 
 
 class Demo:

@@ -205,10 +205,12 @@ def _run(args) -> int:
     from .adapter import adapters
     from .execute import Flagger, _token, drop_stale_history, execute, repo_of, say
     from .flaky import FlakyRun
+    from .version_check import check
 
     root, cfg, ctx, projects, steps, caps, reach = _prepare(args)
     drop_stale_history(root, ctx, cfg.default_branch)
     say(ctx.reason)
+    check(_version(), _token(ctx))
     if caps["line"]:
         say(caps["line"])
     if not steps:
