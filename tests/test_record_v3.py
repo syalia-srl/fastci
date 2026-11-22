@@ -6,9 +6,13 @@ import json
 
 import pytest
 
+from fastci.python.mapfile import FileEntry
+
 CASE = """
 import subprocess, sys, time
 import pytest
+
+from fastci.python.mapfile import FileEntry
 
 @pytest.fixture(scope="module")
 def slow_db():
@@ -76,6 +80,8 @@ def test_the_plugin_records_phases_fixture_runs_spawns_and_the_lane(recorded):
 def test_under_xdist_a_module_fixture_runs_once_per_worker_and_module(recorded):
     mod = """
 import pytest
+
+from fastci.python.mapfile import FileEntry
 @pytest.fixture(scope="module")
 def db():
     return 1
@@ -88,3 +94,28 @@ def test_x(db, n):
     assert runs and all(r[4].startswith("gw") for r in runs)
     keys = [(r[4], r[3].split("::")[0]) for r in runs]
     assert len(keys) == len(set(keys))
+
+
+def test_lines_run_only_at_import_are_kept_unattributed(health_map):
+    _, tm = health_map
+    early = tm.unattributed["src/health/early.py"]
+    assert early and not tm.files.get("src/health/early.py", FileEntry()).lines.keys() & early
+
+
+def test_every_source_file_has_its_executable_lines(health_map):
+    _, tm = health_map
+    assert len(tm.executable["src/health/dead.py"]) == 5
+    assert "src/health/tool.py" in tm.executable
+    assert tm.executable.get("src/health/broken.py", set()) == set()
+    assert tm.lane["unparsed"] == ["src/health/broken.py"]
+
+
+def test_the_plugins_notes_reach_the_map(health_map):
+    _, tm = health_map
+    i = tm.tests.index("tests/test_clock.py::test_waits")
+    assert tm.phases[i][1] >= 0.6
+    assert tm.tests.index("tests/test_spawn.py::test_child") in tm.spawns
+    assert tm.lane["deselected"] == ["tests/test_lane.py::test_slow"]
+    assert tm.lane["skipped"] == {"tests/test_lane.py::test_skip": "needs a gpu"}
+    warm = [k for k, f in enumerate(tm.fixtures) if f[0] == "warm"]
+    assert len(warm) == 1 and sum(1 for r in tm.fixture_runs if r[0] == warm[0]) == 3

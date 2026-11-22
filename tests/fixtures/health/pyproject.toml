@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = ["slow: slow", "always: always"]
+
+# 14 tests, and long_path runs in 7 of them: with the default 0.2 its lines would count
+# as shared and the overlap sections would have nothing to find.
+[tool.fastci.flaky]
+reach-share = 0.6

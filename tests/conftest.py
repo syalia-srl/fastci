@@ -9,6 +9,7 @@ import pytest
 pytest_plugins = ["pytester"]
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample"
+HEALTH = Path(__file__).parent / "fixtures" / "health"
 
 
 def sh(cwd, *cmd):
@@ -57,3 +58,38 @@ def run_testmap(repo, *args):
 
 def commit(repo, msg="change"):
     sh(repo, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", msg)
+
+
+@pytest.fixture(scope="session")
+def health_map(tmp_path_factory):
+    """The health sample recorded once: (repo, its map). Recording costs about 2 s, and the
+    report's tests only read it."""
+    from fastci.python.mapfile import TestMap
+
+    repo = tmp_path_factory.mktemp("health") / "health"
+    shutil.copytree(HEALTH, repo)
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "-c", "user.email=t@t", "-c", "user.name=t", "add", ".")
+    sh(repo, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("FASTCI_", "GITHUB_", "GH_"))}
+    p = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fastci.cli",
+            "map",
+            "record",
+            "--",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-m",
+            "not slow",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert (repo / ".fastci" / "map.json.gz").exists(), p.stderr + p.stdout
+    return repo, TestMap.load(str(repo / ".fastci" / "map.json.gz"))

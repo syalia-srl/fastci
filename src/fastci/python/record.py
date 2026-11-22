@@ -63,7 +63,7 @@ def record(
         *pytest_args,
     ]
     code = subprocess.run(cmd, cwd=root, env=env).returncode
-    tm = build(work, data, root)
+    tm = build(work, data, root, sources)
     tm.peak_rss = peak_rss(pytest_args)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tm.save(out)
@@ -75,17 +75,19 @@ def record(
     return code
 
 
-def build(work: str, data: str, root: str) -> TestMap:
+def build(work: str, data: str, root: str, sources: list[str] | None = None) -> TestMap:
     """Turn the coverage data and the plugin's notes into a map."""
     import coverage
 
     durations: dict[str, float] = {}
     opens: dict[str, set[str]] = {}
     always: set[str] = set()
+    notes = Notes()
     for f in glob.glob(os.path.join(work, "tests-*.json")):
         d = json.loads(Path(f).read_text())
         durations.update(d["durations"])
         always.update(d["always"])
+        notes.add(d)
         for t, paths in d["opens"].items():
             opens.setdefault(t, set()).update(paths)
     for f in glob.glob(os.path.join(work, "sub-*.json")):
@@ -104,6 +106,7 @@ def build(work: str, data: str, root: str) -> TestMap:
     cov = coverage.CoverageData(basename=data)
     cov.read()
     files: dict[str, FileEntry] = {}
+    unattributed: dict[str, set[int]] = {}
     for measured in cov.measured_files():
         full = os.path.realpath(measured)
         if not full.startswith(root + os.sep):
@@ -119,6 +122,7 @@ def build(work: str, data: str, root: str) -> TestMap:
         for lineno, contexts in cov.contexts_by_lineno(measured).items():
             ids = {idx(c.split("|")[0]) for c in contexts if "::" in c}
             if not ids:
+                unattributed.setdefault(rel, set()).add(lineno)
                 continue
             entry.tests |= ids
             body = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
@@ -135,14 +139,109 @@ def build(work: str, data: str, root: str) -> TestMap:
         for p in paths:
             reads.setdefault(p, set()).add(idx(t))
 
-    return TestMap(
+    tm = TestMap(
         sha=git(root, "rev-parse", "HEAD"),
         tests=tests,
         durations=[durations.get(t, 0.0) for t in tests],
         always={index[t] for t in always if t in index},
         files=files,
         reads=reads,
+        unattributed=unattributed,
     )
+    notes.fill(tm, idx)
+    exclude = exclusions(os.path.join(work, "coveragerc"))
+    unparsed = []
+    for rel in source_files(root, sources or default_sources(root)):
+        lines = executable_lines(os.path.join(root, rel), exclude)
+        tm.executable[rel] = lines or set()
+        if lines is None:
+            unparsed.append(rel)
+    tm.lane["unparsed"] = sorted(unparsed)
+    return tm
+
+
+class Notes:
+    """The plugin's version 3 notes, merged over its tests-*.json files."""
+
+    def __init__(self):
+        self.phases: dict[str, list[float]] = {}
+        self.requested: dict[str, list[list[str]]] = {}
+        self.runs: list[list] = []
+        self.spawns: set[str] = set()
+        self.deselected: set[str] = set()
+        self.skipped: dict[str, str] = {}
+        self.args: list[str] = []
+
+    def add(self, d: dict) -> None:
+        self.phases.update(d.get("phases", {}))
+        self.requested.update(d.get("requested", {}))
+        self.runs += d.get("fixture_runs", [])
+        self.spawns.update(d.get("spawns", []))
+        self.deselected.update(d.get("deselected", []))
+        self.skipped.update(d.get("skipped", {}))
+        self.args = d.get("args") or self.args
+
+    def fill(self, tm: TestMap, idx) -> None:
+        table: dict[tuple, int] = {}
+
+        def fixture(name, scope, baseid) -> int:
+            key = (name, scope, baseid)
+            if key not in table:
+                table[key] = len(tm.fixtures)
+                tm.fixtures.append(key)
+            return table[key]
+
+        tm.fixture_runs = [
+            (fixture(name, scope, baseid), idx(test), worker, seconds)
+            for name, scope, baseid, test, worker, seconds in self.runs
+            if test
+        ]
+        tm.spawns = {idx(t) for t in self.spawns}
+        tm.durations += [0.0] * (len(tm.tests) - len(tm.durations))
+        # After the two above, which may add a test the durations did not name.
+        tm.phases = [tuple(self.phases.get(t, (0.0, 0.0, 0.0))) for t in tm.tests]
+        tm.requested = [[fixture(*r) for r in self.requested.get(t, [])] for t in tm.tests]
+        tm.lane = {
+            "args": self.args,
+            "deselected": sorted(self.deselected),
+            "skipped": dict(sorted(self.skipped.items())),
+        }
+
+
+OMIT = ("tests", ".venv", "site-packages", "node_modules", ".git")
+
+
+def source_files(root: str, sources: list[str]) -> list[str]:
+    """Every Python file under the sources, minus what the recording omits."""
+    out = set()
+    for s in sources:
+        for p in Path(root, s).rglob("*.py"):
+            rel = os.path.relpath(p, root)
+            parts = Path(rel).parts
+            if any(o in parts for o in OMIT) or p.name.startswith("test_"):
+                continue
+            out.add(rel)
+    return sorted(out)
+
+
+def exclusions(rc: str) -> str:
+    """Coverage's exclusion regex for the recording's config."""
+    import coverage
+
+    rules = coverage.Coverage(config_file=rc if os.path.exists(rc) else False).config.exclude_list
+    return "|".join(f"(?:{r})" for r in rules)
+
+
+def executable_lines(path: str, exclude: str) -> set[int] | None:
+    """The lines coverage counts as statements; None when the file is not Python."""
+    from coverage.parser import PythonParser
+
+    try:
+        parser = PythonParser(filename=path, exclude=exclude)
+        parser.parse_source()
+    except Exception:
+        return None
+    return set(parser.statements)
 
 
 def peak_rss(pytest_args: list[str]) -> int:
