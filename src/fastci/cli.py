@@ -277,6 +277,79 @@ def _setup(args) -> int:
     return 0
 
 
+def _report_maps(args, root: str, cfg, token: str | None, repo: str | None) -> list[str]:
+    """Paths of the maps to read, newest first; fetched into a temp dir when not given."""
+    from .fetch import _download, newest_artifacts
+
+    if args.report_maps:
+        return args.report_maps
+    if token and repo:
+        try:
+            arts = newest_artifacts(repo, "fastci", cfg.default_branch, token, args.maps)
+            tmp = tempfile.mkdtemp(prefix="fastci-report-")
+            paths = []
+            for i, art in enumerate(arts):
+                path = os.path.join(tmp, f"map-{i}.json.gz")
+                _download(art["archive_download_url"], token, path)
+                paths.append(path)
+            if paths:
+                return paths
+        except Exception as e:
+            print(f"fastci: could not fetch main's maps ({e or type(e).__name__})", file=sys.stderr)
+    local = os.path.join(root, DEFAULT_MAP)
+    if os.path.exists(local):
+        print(f"fastci: reading the local map {DEFAULT_MAP}", file=sys.stderr)
+        return [local]
+    return []
+
+
+def _report_history(args, cfg, token: str | None, repo: str | None):
+    from .fetch import _download, newest_artifact
+    from .flaky import History
+
+    if args.flaky:
+        return History.load(args.flaky)
+    if not (token and repo):
+        return None
+    try:
+        art = newest_artifact(repo, "fastci-flaky", cfg.default_branch, token)
+        if art is None:
+            return None
+        path = os.path.join(tempfile.mkdtemp(prefix="fastci-report-"), "flaky.json")
+        _download(art["archive_download_url"], token, path, "flaky.json")
+        return History.read(path)
+    except Exception as e:
+        print(
+            f"fastci: could not fetch the flaky history ({e or type(e).__name__})", file=sys.stderr
+        )
+        return None
+
+
+def _report(args) -> int:
+    from .config import load
+    from .fetch import repo_from_remote
+    from .python.mapfile import TestMap
+    from .report import Suite, build, render
+
+    root = _root()
+    cfg = load(root)
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    repo = args.repo or repo_from_remote(root)
+    paths = _report_maps(args, root, cfg, token, repo)
+    if not paths:
+        print("fastci: no map; record one with `fastci map record` or pass --map", file=sys.stderr)
+        return 2
+    maps = [TestMap.load(p) for p in paths]
+    history = _report_history(args, cfg, token, repo)
+    model = build(Suite(maps=maps, root=root, reach_share=cfg.flaky.reach_share), history)
+    print(render.as_json(model) if args.json else render.text(model, args.report_top), end="")
+    if args.html:
+        with open(args.html, "w", encoding="utf-8") as f:
+            f.write(render.html(model))
+        print(f"fastci: report written to {args.html}", file=sys.stderr)
+    return 0
+
+
 def _version() -> str:
     from . import __version__
 
@@ -331,6 +404,14 @@ def main(argv: list[str] | None = None) -> int:
         "--check", action="store_true", help="list old workflow steps fastci does not cover"
     )
     top.add_parser("guide", help="print how to move a repository's CI to fastci")
+    rp = top.add_parser("report", help="the suite's health from main's maps, running no test")
+    rp.add_argument("--map", dest="report_maps", action="append", help="a local map (repeatable)")
+    rp.add_argument("--maps", type=int, default=1, help="fetch this many newest maps of main")
+    rp.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"), help="owner/name")
+    rp.add_argument("--flaky", help="a local flaky history instead of main's")
+    rp.add_argument("--json", action="store_true", help="print the whole model as JSON")
+    rp.add_argument("--html", help="also write the report as one HTML page here")
+    rp.add_argument("--top", dest="report_top", type=int, default=10, help="entries per section")
 
     args = parser.parse_args(own)
     from .config import ConfigError
@@ -352,6 +433,8 @@ def _dispatch(args, parser, rest) -> int:
         return _fix(args)
     if args.top == "setup":
         return _setup(args)
+    if args.top == "report":
+        return _report(args)
     if args.top == "guide":
         from importlib.resources import files
 
