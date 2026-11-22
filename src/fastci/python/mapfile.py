@@ -14,7 +14,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-VERSION = 2
+VERSION = 3
 
 
 def line_hash(text: str) -> str:
@@ -88,6 +88,17 @@ class TestMap:
     files: dict[str, FileEntry]
     reads: dict[str, set[int]]
     peak_rss: int = 0  # bytes per pytest worker while recording; 0 when unknown
+    # Version 3, for the suite health report; empty when the map is older.
+    version: int = VERSION
+    unattributed: dict[str, set[int]] = field(default_factory=dict)  # run outside any test
+    executable: dict[str, set[int]] = field(default_factory=dict)  # every source file
+    phases: list[tuple[float, float, float]] = field(default_factory=list)  # per test
+    fixtures: list[tuple[str, str, str]] = field(default_factory=list)  # name, scope, baseid
+    requested: list[list[int]] = field(default_factory=list)  # per test: fixture indexes
+    # fixture index, test index, worker id, seconds
+    fixture_runs: list[tuple[int, int, str, float]] = field(default_factory=list)
+    spawns: set[int] = field(default_factory=set)  # tests that started a child process
+    lane: dict = field(default_factory=dict)  # args, deselected, skipped, unparsed
 
     def ids(self, idx) -> set[str]:
         return {self.tests[i] for i in idx}
@@ -109,6 +120,14 @@ class TestMap:
             },
             "reads": {p: sorted(i) for p, i in self.reads.items()},
             "peak_rss": self.peak_rss,
+            "unattributed": {p: sorted(i) for p, i in self.unattributed.items()},
+            "executable": {p: sorted(i) for p, i in self.executable.items()},
+            "phases": [[round(x, 4) for x in ph] for ph in self.phases],
+            "fixtures": [list(f) for f in self.fixtures],
+            "requested": self.requested,
+            "fixture_runs": [[f, t, w, round(s, 4)] for f, t, w, s in self.fixture_runs],
+            "spawns": sorted(self.spawns),
+            "lane": self.lane,
         }
         with gzip.open(path, "wt") as f:
             json.dump(data, f, separators=(",", ":"))
@@ -117,7 +136,7 @@ class TestMap:
     def load(cls, path: str) -> TestMap:
         with gzip.open(path, "rt") as f:
             data = json.load(f)
-        if data.get("version") not in (1, VERSION):
+        if data.get("version") not in (1, 2, VERSION):
             raise ValueError(f"map version {data.get('version')} is not {VERSION}")
         files = {
             p: FileEntry(
@@ -135,4 +154,13 @@ class TestMap:
             files=files,
             reads={p: set(i) for p, i in data["reads"].items()},
             peak_rss=int(data.get("peak_rss", 0)),
+            version=data["version"],
+            unattributed={p: set(i) for p, i in data.get("unattributed", {}).items()},
+            executable={p: set(i) for p, i in data.get("executable", {}).items()},
+            phases=[tuple(ph) for ph in data.get("phases", [])],
+            fixtures=[tuple(f) for f in data.get("fixtures", [])],
+            requested=data.get("requested", []),
+            fixture_runs=[tuple(r) for r in data.get("fixture_runs", [])],
+            spawns=set(data.get("spawns", [])),
+            lane=data.get("lane", {}),
         )
