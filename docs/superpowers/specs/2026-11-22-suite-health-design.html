@@ -154,6 +154,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <div class="wrap">
 <nav class="toc" id="toc">
   <a href="#delivers">What this delivers</a>
+  <a class="sub" href="#evaluation">Evaluation</a>
   <a href="#decisions">Decisions</a>
   <a href="#inputs">What main records</a>
   <a href="#sections">The report's sections</a>
@@ -186,6 +187,31 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <p>The largest group is two benchmark tests of 596 s and 577 s that run the same code path. An agent reading that pair asks whether both need their own run of the solver or can share one fixture. That question is what this report exists to raise. It cannot answer it: two tests that run the same lines may assert different things.</p>
 <p>The same script showed what does not work. Every pair of tests with a line in common is 642,063 pairs, and pairs with a Jaccard index of 0.9 or more are 11,702: too many to read. 83% of the tests have no line that only they run, which is normal for a suite and says nothing alone. The report therefore groups, ranks by seconds, and cuts each section to its top entries.</p>
 
+<h3 id="evaluation">What an evaluation on five repositories changed</h3>
+<p>Before this design was settled, a prototype of every section ran on the main maps of five repositories of different kinds: a server with a solver (3,116 tests), an async server tested end to end (4,393), a game (1,237), a CLI that is also a pytest plugin (360) and a small server (21). For each section, an agent took a sample of findings, read the code each one names, and judged it: real (acting on it improves the suite), weak (true, not worth acting on) or false (wrong or misleading).</p>
+<div class="stats">
+  <div class="stat"><div class="v">357</div><div class="k">findings judged by reading the tests</div></div>
+  <div class="stat"><div class="v">92</div><div class="k">real</div></div>
+  <div class="stat"><div class="v">89</div><div class="k">false; 86% of them dismissed at a glance</div></div>
+  <div class="stat"><div class="v">0</div><div class="k">false among 60 findings of the time sections</div></div>
+</div>
+<table class="tbl">
+<thead><tr><th>Prototype section</th><th>real / weak / false</th><th>In this design</th></tr></thead>
+<tbody>
+<tr><td>slowest</td><td>24 / 16 / 0</td><td class="why">kept, with phases and marks</td></tr>
+<tr><td>by test file</td><td>14 / 6 / 0</td><td class="why">kept, with the per-file floor</td></tr>
+<tr><td>same path</td><td>18 / 28 / 14</td><td class="why">kept; parametrized cases collapsed, at least 15 own lines</td></tr>
+<tr><td>near same</td><td>10 / 28 / 2</td><td class="why">kept as clusters inside a test file</td></tr>
+<tr><td>by file</td><td>8 / 5 / 7</td><td class="why">kept, with import-time lines counted and untested functions inside each row</td></tr>
+<tr><td>untested functions</td><td>10 / 12 / 18</td><td class="why">folded into by file; body lines only; nested functions folded into their parent</td></tr>
+<tr><td>never imported</td><td>2 / 11 / 6</td><td class="why">kept last, scripts apart</td></tr>
+<tr><td>by module</td><td>2 / 11 / 5</td><td class="why">a subtotal row in by file</td></tr>
+<tr><td>hot functions</td><td>2 / 11 / 7</td><td class="why">replaced by the start-up path</td></tr>
+<tr><td>thin functions</td><td>2 / 25 / 13</td><td class="why">cut</td></tr>
+<tr><td>only shared</td><td>0 / 23 / 17</td><td class="why">cut</td></tr>
+</tbody></table>
+<p>Most of the largest real savings were repeated set-up: a module fixture built twice because two test files interleave on one xdist worker, a function-scoped app fixture paid by 882 tests, a sample repository recorded again in every test. The prototype showed the symptom (a slow test, a group with the same path) and the agent found the cause by reading. Most false findings came from three gaps in what the map records, not from the report: lines that run at import, work in child processes or threads, and test lanes the map is not recorded with. Section 03 closes the first and labels the other two.</p>
+
 <h2 id="decisions"><span class="n">02</span>Decisions</h2>
 <table class="tbl">
 <thead><tr><th>Decision</th><th>Why</th><th>Whose</th></tr></thead>
@@ -194,49 +220,54 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <tr><td>The first reader is an agent</td><td class="why">An agent uses it before a release, or when asked, to decide how to refactor the tests so the suite is faster and better. The default output is ranked text with numbers; <code>--json</code> holds everything.</td><td class="who">maintainer</td></tr>
 <tr><td>An HTML page from the same data</td><td class="why">A person reads the same findings with sortable tables and bars. Both outputs render one data model, so they never disagree.</td><td class="who">maintainer</td></tr>
 <tr><td>A command inside fastci, <code>fastci report</code></td><td class="why">It loads the map with fastci's own loader, so a new map version cannot break it silently, and every repo gets it with the tool.</td><td class="who">maintainer</td></tr>
+<tr><td>Sections tuned on five real repositories</td><td class="why">The evaluation in 01 decided which sections stay, their thresholds and their order.</td><td class="who">maintainer</td></tr>
 <tr><td>Findings carry evidence, not verdicts</td><td class="why">Coverage cannot see assertions. The report says "these four tests run the same 212 lines and cost 31 s"; the agent reads the tests and decides.</td><td class="who">agent</td></tr>
-<tr><td>Overlap ignores lines run by more than <code>reach-share</code> of the suite</td><td class="why">Start-up code that every test runs makes every test look like every other. The flaky rule already uses this threshold (a fifth by default).</td><td class="who">agent</td></tr>
+<tr><td>Time first, then overlap, then coverage</td><td class="why">The order of the evaluation's real-finding rates: 63% for time, 28% for the overlap sections kept, 18% for coverage.</td><td class="who">agent</td></tr>
+<tr><td>Overlap ignores lines run by more than <code>reach-share</code> of the suite, and says how many it removed</td><td class="why">Start-up code that every test runs makes every test look like every other. In the game no line reached a fifth of the suite and the filter removed nothing; printing the count tells the agent what "own lines" means in that repository.</td><td class="who">agent</td></tr>
+<tr><td>A header of what the map cannot see</td><td class="why">Tests outside the recorded lanes, tests that start child processes and skipped tests caused most of the false findings that were not import-time lines. Naming them up front makes those findings quick to dismiss.</td><td class="who">agent</td></tr>
 <tr><td>It never fails a run</td><td class="why">No thresholds, no exit code from findings. A coverage gate is a separate decision a repo can make with its own stage.</td><td class="who">agent</td></tr>
-<tr><td>Map version 3 records three new things</td><td class="why">Executable lines per file, the set-up, call and teardown time of each test, and each test's fixtures. Without them there is no coverage percentage and no "this test is slow because of its set-up".</td><td class="who">agent</td></tr>
 </tbody></table>
 
 <h2 id="inputs"><span class="n">03</span>What main records</h2>
 <p>Today's map (version 2, <code>src/fastci/python/mapfile.py</code>) holds the tests with one duration each, for each executed line the tests that ran it with a hash of its text, the same per function, and the repository files each test reads. Main also uploads <code>.fastci/flaky.json</code> as the <code>fastci-flaky</code> artifact (90 days): for each test that failed and passed on retry, and for each flagged test, its last 50 outcomes on main.</p>
-<p>Version 3 adds three fields. Every one is filled during the same recording run, so the map job costs no extra run.</p>
+<p>Version 3 adds the fields below. Every one is filled during the same recording run, so the map job costs no extra run.</p>
 <table class="tbl">
 <thead><tr><th>Field</th><th>What it holds</th><th>Where it comes from</th></tr></thead>
 <tbody>
-<tr><td><code>executable</code></td><td>For every Python file under the map's sources, including files no test imports, its executable line numbers.</td><td>coverage's own analysis with the recording's config, so the numbers match <code>coverage report</code>. Files never imported are found by walking the sources and parsing them the way coverage does for <code>source</code> files with no data.</td></tr>
-<tr><td><code>phases</code></td><td>For each test, its set-up, call and teardown seconds. <code>durations</code> stays the sum, so the picker and old readers are unchanged.</td><td>the plugin's <code>pytest_runtest_logreport</code>, which already sums the three.</td></tr>
-<tr><td><code>fixtures</code></td><td>For each test, the names of the fixtures it requested with their scope, stored once in a table and referred to by index like the tests.</td><td><code>item.fixturenames</code> and the fixture definitions at collection.</td></tr>
+<tr><td><code>unattributed</code></td><td>Per file, the lines that ran outside any test: at import during collection, in session hooks. They count as covered and are attributed to no test, so the picker is unchanged.</td><td>the coverage data's lines whose only context is empty, which <code>record.build</code> drops today. Without them the evaluation measured coverage 1 to 24 points too low (77% instead of about 91% on the async server).</td></tr>
+<tr><td><code>executable</code></td><td>For every Python file under the map's sources, including files no test imports, its executable line numbers.</td><td>coverage's own analysis with the recording's config, so the numbers match <code>coverage report</code>. Files never imported are parsed the way coverage does for <code>source</code> files with no data.</td></tr>
+<tr><td><code>phases</code></td><td>For each test, its set-up, call and teardown seconds. <code>durations</code> stays the sum.</td><td>the plugin's <code>pytest_runtest_logreport</code>, which already sums the three.</td></tr>
+<tr><td><code>fixtures</code></td><td>For each test, the fixtures it requested with their scope, stored once in a table and referred to by index.</td><td><code>item.fixturenames</code> and the fixture definitions at collection.</td></tr>
+<tr><td><code>spawns</code></td><td>The tests that started a child process.</td><td>a hook on <code>subprocess.Popen</code> that the plugin installs while a test runs, so a child is seen even when its environment drops fastci's variables.</td></tr>
+<tr><td><code>lane</code></td><td>The pytest arguments and marker expression the map was recorded with, the tests collected but deselected, and the tests skipped with their reason.</td><td>the plugin at collection and in its reports.</td></tr>
 </tbody></table>
-<p>A version 2 map still loads. The report then leaves out the coverage percentages and the set-up columns and says why in one line. The picker and the flaky rule ignore the new fields.</p>
-<p>Durations are recorded under coverage, which slows Python code by a factor that varies by test. The report says so in its header and ranks by them anyway: the order is what an agent needs. With <code>--maps N</code> it fetches the newest N main maps (they are kept 14 days) and takes each test's median, which removes most of the noise of one run on a shared runner.</p>
+<p>A version 2 map still loads. The report then leaves out what needs the new fields and says so in one line per section. The picker and the flaky rule ignore the new fields.</p>
+<p>Durations are recorded under coverage, which slows Python code by a factor that varies by test. The report says so in its header and ranks by them anyway: the order is what an agent needs. With <code>--maps N</code> it fetches the newest N main maps (they are kept 14 days) and takes each test's median.</p>
 
 <h2 id="sections"><span class="n">04</span>The report's sections</h2>
 <p>Each section lists its top entries (<code>--top</code>, 10 by default), ranked by seconds unless said otherwise, and a one-line total. Every entry names the tests or files with the numbers behind it. Under each section heading is one line that tells the agent what kind of change the section points to.</p>
 
+<div class="find"><h4>Header: what this map cannot see</h4><p>The map's commit and date, the lane it was recorded with, how many tests were deselected or skipped (and the tests skipped with the same reason on every recent map), how many tests started a child process, and how many lines <code>reach-share</code> removed from overlap. Every later finding that one of these could explain carries a short tag: <code>spawns</code>, <code>outside the lane</code>, <code>shared fixture</code>.</p></div>
+
 <h3 id="time">Time</h3>
-<div class="find"><h4>Slowest tests</h4><p>Node id, seconds, share of the suite's time, set-up / call / teardown split, marks (<code>slow</code>, <code>always</code>). A header line gives how much of the suite's time the top 10 take (41% in the measured repository).</p><div class="act">points to: split the test, mark it slow, or move work out of it</div></div>
-<div class="find"><h4>Expensive set-up</h4><p>Fixtures ranked by the set-up seconds they cost across every test that requested them, with their scope and how many tests requested them. A function-scoped fixture that costs 0.8 s in 120 tests is 96 s.</p><div class="act">points to: widen the fixture's scope, or build its data once</div></div>
-<div class="find"><h4>Time by test file</h4><p>Each test file's tests, seconds, and share. Tells the agent where to look first.</p></div>
+<div class="find"><h4>Expensive set-up</h4><p>Fixtures ranked by the set-up seconds they cost across every test that requested them, with their scope and how many tests requested them. A function-scoped fixture that costs 0.8 s in 120 tests is 96 s. A module fixture whose set-up appears more than once per module is flagged, which is how a fixture rebuilt by interleaved xdist groups shows.</p><div class="act">points to: widen the fixture's scope, or build its data once and copy it</div></div>
+<div class="find"><h4>Slowest tests</h4><p>Node id, seconds, share of the suite's time, set-up / call / teardown split, marks (<code>slow</code>, <code>always</code>). A header line gives how much of the suite's time the top 10 take.</p><div class="act">points to: split the test, mark it slow, shrink its input, or move work out of it</div></div>
+<div class="find"><h4>Much time, little code</h4><p>Tests whose call seconds per own line are far above the suite's median, with a <code>spawns</code> tag when they started a child process. These are waits on a real clock, work in a child process, or work in code outside the sources. The evaluation found real-time polling loops in two repositories that no other section showed.</p><div class="act">points to: a fake clock, an in-process call, or a smaller input</div></div>
+<div class="find"><h4>Time by test file</h4><p>Each test file's tests, seconds, share, and its floor: its fastest test times its test count. A high floor means every test pays the same set-up.</p></div>
 <div class="find"><h4>Cost of always</h4><p>The tests marked <code>always</code> and their total seconds: every pull request pays them.</p></div>
 
-<h3 id="coverage">Coverage</h3>
-<div class="find"><h4>By module and by file</h4><p>For each package (a directory under the sources) and each file in it: executable lines, lines run by at least one test, the percentage, and the number of tests that reach it. Sorted by uncovered lines, not by percentage, so a 2,000-line module at 70% comes before a 10-line file at 0%.</p><div class="act">points to: where a missing test would cover the most code</div></div>
-<div class="find"><h4>Never imported</h4><p>Source files that no test runs at all, with their executable lines. Dead code or untested code; the agent tells which.</p></div>
-<div class="find"><h4>Untested functions</h4><p>Within covered files, the functions no test entered, ranked by length.</p></div>
-<div class="find"><h4>Thinly tested</h4><p>Functions that exactly one test reaches, ranked by length. A change there depends on that one test.</p></div>
-
 <h3 id="overlap">Overlap</h3>
-<p>Every overlap finding uses the lines each test runs minus the lines more than <code>reach-share</code> of the suite runs. These are the test's <em>own lines</em> below.</p>
-<div class="find"><h4>Same code path</h4><p>Groups of tests whose own lines are identical, ranked by the seconds the group costs beyond its fastest test. Each group says whether its tests sit in one file or several, and how many lines they share. Computed by hashing each test's line set: about a second on 3,116 tests.</p><div class="act">points to: parametrize them, merge them, or share one fixture; read the assertions first</div></div>
-<div class="find"><h4>Almost the same</h4><p>Pairs of tests in the same test file whose own lines have a Jaccard index of 0.9 or more and are not identical, with the lines each runs that the other does not. Limited to one test file because across the whole suite the measured repository had 11,702 such pairs and the computation took 44 s.</p></div>
-<div class="find"><h4>Only shared code</h4><p>Tests with no own lines at all: everything they run, at least a fifth of the suite runs too (289 tests in the measured repository). Many are end-to-end tests by design; the list shows their seconds and files read, so the agent can tell those from tests that test nothing specific.</p></div>
-<div class="find"><h4>Overlap by function</h4><p>The functions reached by the most tests, with the count and the seconds of those tests. A function that 400 tests run is a candidate for a fixture or a fake.</p></div>
+<p>Overlap uses each test's <em>own lines</em>: the lines it runs minus the lines more than <code>reach-share</code> of the suite runs. The cases of one parametrized test are one entry everywhere, with their count; groups made only of one test's cases are left out, since parametrizing is already the fix.</p>
+<div class="find"><h4>Same code path</h4><p>Groups of tests with identical own lines and at least 15 of them, ranked by the seconds the group costs beyond its fastest test. Each group says whether its tests sit in one file or several, how many lines they share, and the fixtures they all request. Computed by hashing each test's line set: about a second on 3,116 tests.</p><div class="act">points to: parametrize them, merge them, or share one fixture; read the assertions first</div></div>
+<div class="find"><h4>Almost the same</h4><p>Clusters of tests in one test file whose own lines pairwise have a Jaccard index of 0.9 or more, with the lines each member adds to the cluster's common core. One file only: across the suite the measured repository had 11,702 such pairs.</p></div>
+<div class="find"><h4>Start-up path</h4><p>The functions that more than <code>reach-share</code> of the suite runs, merged into rows by identical sets of tests, with the count and the floor those tests pay. The evaluation's best finding on the async server was here: 1,535 tests boot the whole app when some only check a validator.</p><div class="act">points to: call the unit directly, or share the booted app</div></div>
+
+<h3 id="coverage">Coverage</h3>
+<div class="find"><h4>By file, with a subtotal per package</h4><p>For each file: executable lines, lines run (by a test or at import), the percentage, and the tests that reach it. Inside each row, its functions whose body no test entered, ranked by length, nested functions folded into their parent. A function counts as entered only when a line of its body ran, not its <code>def</code>. Sorted by uncovered lines. A row is tagged <code>outside the lane</code> when deselected or skipped tests import that file, and <code>spawns</code> when tests that start child processes read it.</p><div class="act">points to: where a missing test would cover the most code</div></div>
+<div class="find"><h4>Never imported</h4><p>Source files that nothing runs, with their executable lines, split in two: scripts (a <code>__main__</code> block, a path under <code>scripts/</code> or <code>tools/</code>, or named by the Makefile or a doc) and the rest.</p><div class="act">points to: dead code, or a script that needs a smoke test</div></div>
 
 <h3 id="flaky">Flaky</h3>
-<div class="find"><h4>Flaky on main</h4><p>From the <code>fastci-flaky</code> history: each test that failed and passed on retry on main, its failures over its recorded runs, the date and commit of the last failure, whether it is flagged, and its issue. Sorted by failure rate. When the history is missing (no artifact, or a repo with retries off) the section says so and is empty.</p><div class="act">points to: fix the race or the order dependence; the existing flaky chapter tells how</div></div>
+<div class="find"><h4>Flaky on main</h4><p>From the <code>fastci-flaky</code> history: each test that failed and passed on retry on main, its failures over its recorded runs, the date and commit of the last failure, whether it is flagged, and its issue. Sorted by failure rate. When the history is missing the section says so and is empty. No repository in the evaluation had a history yet, so this section is unmeasured.</p><div class="act">points to: fix the race or the order dependence; the flaky chapter tells how</div></div>
 
 <h2 id="outputs"><span class="n">05</span>Text, JSON and HTML</h2>
 <pre>fastci report                     # the newest main map, fetched; text on stdout
@@ -286,7 +317,7 @@ Same code path: 345 groups, 1091 tests, 953 s beyond the fastest of each
 
 <h2 id="delivery"><span class="n">08</span>Delivery</h2>
 <div class="steps">
-<div class="step"><div class="n"></div><div><h4>Map version 3</h4><p>Record executable lines, phases and fixtures; load version 2 and 3; the picker and the flaky rule unchanged. Its own pull request, so main's next run uploads a version 3 map before the report needs it.</p></div></div>
+<div class="step"><div class="n"></div><div><h4>Map version 3</h4><p>Record unattributed and executable lines, phases, fixtures, spawns and the lane; load version 2 and 3; the picker and the flaky rule unchanged. Its own pull request, so main's next run uploads a version 3 map before the report needs it.</p></div></div>
 <div class="step"><div class="n"></div><div><h4>The model and the text and JSON outputs</h4><p><code>src/fastci/report.py</code> builds the sections; <code>fastci report</code> in the CLI; local maps and fetching.</p></div></div>
 <div class="step"><div class="n"></div><div><h4>The HTML page</h4><p>One template in <code>src/fastci/templates/</code>, the model embedded as JSON and every table also rendered as markup, so the page reads without scripts.</p></div></div>
 <div class="step"><div class="n"></div><div><h4>Several maps and the flaky history</h4><p><code>--maps N</code> with medians, and the flaky section from the <code>fastci-flaky</code> artifact.</p></div></div>
@@ -295,11 +326,12 @@ Same code path: 345 groups, 1091 tests, 953 s beyond the fastest of each
 
 <h2 id="testing"><span class="n">09</span>Testing</h2>
 <ul>
-<li>A small fixture repository with known overlap: two tests with identical lines, a pair at Jaccard 0.9, a test that runs only shared code, a module no test imports, a function-scoped fixture with a sleep. Each section is asserted against these known answers, and each assertion is checked to go red when its fixture case is removed.</li>
+<li>A small fixture repository with known answers: two tests with identical lines, a parametrized test whose cases must collapse, a cluster at Jaccard 0.9, a module no test imports and a script, a function only its <code>def</code> line reaches, a module whose functions are called at import, a function-scoped fixture with a sleep, a module fixture rebuilt by two interleaved files, a test that polls a real clock, a test that starts a child process, and a deselected test. Each section is asserted against these known answers, and each assertion is checked to go red when its fixture case is removed.</li>
 <li>The map version 3 round trip, and a version 2 map that loads and produces the "not in this map" notes.</li>
 <li>The text, JSON and HTML render the same entries: a test compares their node ids.</li>
 <li>The HTML page: no request to the network, no JS error, nothing wider than a 390 px phone (Playwright, in the slow tier).</li>
-<li>A budget: the report on the measured repository's map builds in under 10 s on a laptop.</li>
+<li>A budget: the report on the largest evaluated map (4,393 tests) builds in under 20 s on a laptop; the prototype took 17 s.</li>
+<li>Before release, the evaluation is run again on the same five maps re-recorded as version 3, with the same sampling and verdicts. The target: no false finding in the time sections, and under 15% false overall (25% in the prototype).</li>
 </ul>
 
 <h2 id="nongoals"><span class="n">10</span>Non-goals and open questions</h2>
@@ -308,7 +340,8 @@ Same code path: 345 groups, 1091 tests, 953 s beyond the fastest of each
 <li>No coverage gate and no exit code from findings.</li>
 <li>No coverage of set-up apart from the test body: that needs phase-aware maps (#3). Version 3 records phase times, not phase lines.</li>
 <li>Languages other than Python follow when fastci's adapters for them record maps.</li>
-<li>Open: whether "Almost the same" should look across files when a file holds fewer than, say, 50 tests. The fixture repository and one real map will tell whether the extra pairs are worth reading.</li>
+<li>Settled by the evaluation: "Almost the same" stays inside one test file. No open question remains for the maintainer.</li>
+<li>Not attempted: tests whose assertions are a subset of a neighbour's. The map does not see assertions.</li>
 </ul>
 </main>
 </div>
