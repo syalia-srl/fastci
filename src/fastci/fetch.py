@@ -59,9 +59,10 @@ def _send(method: str, url: str, token: str, body: dict, timeout: float = 30) ->
         return json.load(r)
 
 
-def newest_artifact(
-    repo: str, name: str, branch: str, token: str, timeout: float = 60
-) -> dict | None:
+def newest_artifacts(
+    repo: str, name: str, branch: str, token: str, n: int, timeout: float = 60
+) -> list[dict]:
+    """The ``n`` newest unexpired artifacts named ``name`` from ``branch``, newest first."""
     url = f"{API}/repos/{repo}/actions/artifacts?name={name}&per_page=100"
     with _get(url, token, timeout=timeout) as r:
         arts = json.load(r)["artifacts"]
@@ -70,7 +71,26 @@ def newest_artifact(
         for a in arts
         if not a["expired"] and (a.get("workflow_run") or {}).get("head_branch") == branch
     ]
-    return max(arts, key=lambda a: a["created_at"]) if arts else None
+    return sorted(arts, key=lambda a: a["created_at"], reverse=True)[:n]
+
+
+def newest_artifact(
+    repo: str, name: str, branch: str, token: str, timeout: float = 60
+) -> dict | None:
+    arts = newest_artifacts(repo, name, branch, token, 1, timeout)
+    return arts[0] if arts else None
+
+
+def repo_from_remote(root: str) -> str | None:
+    """``owner/name`` of the repository's ``origin`` on github.com, or None."""
+    import re
+    import subprocess
+
+    url = subprocess.run(
+        ["git", "-C", root, "remote", "get-url", "origin"], capture_output=True, text=True
+    ).stdout.strip()
+    m = re.search(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", url)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 def green_shas(

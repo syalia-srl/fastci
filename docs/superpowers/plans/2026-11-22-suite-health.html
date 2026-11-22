@@ -118,7 +118,7 @@ code,pre{overflow-wrap:anywhere;font-variant-ligatures:none}
 -->
 <div class="chrome">
   <div class="bar"><span>fastci</span><span class="tab">plan · suite health</span>
-    <span class="st"><span class="pill acc">execution method: not chosen yet</span><span class="pill">2026-11-22</span></span></div>
+    <span class="st"><span class="pill acc">execution: inline</span><span class="pill">2026-11-22</span></span></div>
   <div class="progress"><span id="pcount">0 of 0 done</span><div class="track" id="ptrack"></div></div>
 </div>
 <main>
@@ -186,7 +186,7 @@ code,pre{overflow-wrap:anywhere;font-variant-ligatures:none}
 </table>
 
 <!-- ============================================================ TASK 1 -->
-<details class="task" id="task-1" data-state="pending">
+<details class="task" id="task-1" data-state="done">
 <summary><span class="num">1</span><span><span class="ttl">Map version 3: fields, save, load</span><span class="files">src/fastci/python/mapfile.py · tests/test_mapfile.py</span></span><span class="state"></span></summary>
 <div class="body">
 <h4>interfaces</h4>
@@ -242,7 +242,7 @@ def test_a_version_2_map_loads_with_empty_new_fields(tmp_path):
 </div></details>
 
 <!-- ============================================================ TASK 2 -->
-<details class="task" id="task-2" data-state="pending">
+<details class="task" id="task-2" data-state="done">
 <summary><span class="num">2</span><span><span class="ttl">The plugin records phases, fixture runs, child processes and the lane</span><span class="files">src/fastci/python/plugin.py · tests/test_record_v3.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>All of it is active only under <code>FASTCI_RECORD</code> and lands in the same <code>tests-&lt;worker&gt;.json</code>, under new keys: <code>phases</code> (<code>{nodeid: [setup, call, teardown]}</code>), <code>requested</code> (<code>{nodeid: [[name, scope, baseid], ...]}</code>), <code>fixture_runs</code> (<code>[[name, scope, baseid, nodeid, worker, seconds], ...]</code>), <code>spawns</code> (<code>[nodeid, ...]</code>), <code>deselected</code>, <code>skipped</code> (<code>{nodeid: reason}</code>), <code>args</code> (<code>config.invocation_params.args</code>, from the controller only).</p>
@@ -307,7 +307,7 @@ The <code>recorded</code> fixture writes <code>CASE</code> as <code>test_case.py
 </div></details>
 
 <!-- ============================================================ TASK 3 -->
-<details class="task" id="task-3" data-state="pending">
+<details class="task" id="task-3" data-state="done">
 <summary><span class="num">3</span><span><span class="ttl">The recorder: lines run outside tests, executable lines, the plugin's notes; the health sample</span><span class="files">src/fastci/python/record.py · tests/fixtures/health/ · tests/test_record_v3.py · CHANGELOG.md</span></span><span class="state"></span></summary>
 <div class="body">
 <p><code>build(work, data, root)</code> gets a new argument, <code>sources: list[str]</code>, which <code>record</code> passes. It fills the following.</p>
@@ -373,7 +373,7 @@ def test_the_plugins_notes_reach_the_map(health_map):
 </div></details>
 
 <!-- ============================================================ TASK 4 -->
-<details class="task" id="task-4" data-state="pending">
+<details class="task" id="task-4" data-state="done">
 <summary><span class="num">4</span><span><span class="ttl">The report's model and its time sections</span><span class="files">src/fastci/report/__init__.py · src/fastci/report/time.py · tests/test_report_time.py</span></span><span class="state"></span></summary>
 <div class="body">
 <h4>interfaces</h4>
@@ -455,7 +455,7 @@ def test_durations_are_the_median_over_several_maps():
 </div></details>
 
 <!-- ============================================================ TASK 5 -->
-<details class="task" id="task-5" data-state="pending">
+<details class="task" id="task-5" data-state="done">
 <summary><span class="num">5</span><span><span class="ttl">Overlap: same path, almost the same, start-up path</span><span class="files">src/fastci/report/overlap.py · tests/test_report_overlap.py</span></span><span class="state"></span></summary>
 <div class="body">
 <h4>interfaces</h4>
@@ -501,7 +501,7 @@ def test_functions_most_of_the_suite_runs_form_the_startup_path():
 </div></details>
 
 <!-- ============================================================ TASK 6 -->
-<details class="task" id="task-6" data-state="pending">
+<details class="task" id="task-6" data-state="done">
 <summary><span class="num">6</span><span><span class="ttl">Coverage, never imported, the header, flaky</span><span class="files">src/fastci/report/coverage.py · tests/test_report_coverage.py</span></span><span class="state"></span></summary>
 <div class="body">
 <h4>interfaces</h4>
@@ -566,7 +566,7 @@ def test_flaky_rows_come_from_the_history():
 </div></details>
 
 <!-- ============================================================ TASK 7 -->
-<details class="task" id="task-7" data-state="pending">
+<details class="task" id="task-7" data-state="done">
 <summary><span class="num">7</span><span><span class="ttl">Text and JSON, the command, fetching</span><span class="files">src/fastci/report/render.py · src/fastci/cli.py · src/fastci/fetch.py · tests/test_report_cli.py</span></span><span class="state"></span></summary>
 <div class="body">
 <h4>interfaces</h4>
@@ -623,7 +623,7 @@ def test_repo_from_remote(tmp_path, url):
 </div></details>
 
 <!-- ============================================================ TASK 8 -->
-<details class="task" id="task-8" data-state="pending">
+<details class="task" id="task-8" data-state="done">
 <summary><span class="num">8</span><span><span class="ttl">The HTML page</span><span class="files">src/fastci/report/render.py · src/fastci/templates/report.html · tests/test_report_html.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>One file. Python renders every table as markup, so the page reads without scripts. The model is embedded as <code>&lt;script type="application/json" id="model"&gt;</code>, with <code>&lt;/</code> escaped as <code>&lt;\/</code>. A short inline script adds sorting by clicking a column and a filter box per table. Layout: a header with the map's facts and notes, then one section per model section. Each coverage row has a bar. Every table stacks into rows below 640 px, as the spec's own page does. The colours are a dark theme close to the spec page's, with system font stacks.</p>
@@ -657,7 +657,7 @@ def test_a_node_id_with_markup_cannot_break_the_page():
 </div></details>
 
 <!-- ============================================================ TASK 9 -->
-<details class="task" id="task-9" data-state="pending">
+<details class="task" id="task-9" data-state="done">
 <summary><span class="num">9</span><span><span class="ttl">Guide, book chapter, design notes, changelog</span><span class="files">src/fastci/guide.md · docs/chapters/10-suite-health.md · docs/chapters/00-index.md · DESIGN.md · CHANGELOG.md</span></span><span class="state"></span></summary>
 <div class="body">
 <ol class="steps">

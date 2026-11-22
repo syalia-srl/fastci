@@ -9,9 +9,10 @@ What fastci has:
 - the map, recorded by `fastci map record`, and the rules that turn a diff into tests;
 - caps for a laptop: workers sized from free memory, a memory ceiling, a low priority;
 - `fastci setup`, which proposes the configuration and the CI workflow for a repository, and `fastci guide`, which tells an agent how to move a repository's CI to fastci.
+- `fastci report`, which reads the default branch's maps and says where the suite spends its time, which tests run the same code, what no test runs, and which tests flake.
 
 Python projects with pytest are supported today. Other languages plug in as adapters (the last chapter).
 
 The book is also a [PDF](fastci.pdf).
 
-The [Quick Start](quick-start.html) runs fastci on a small project in a few minutes. The User Guide then follows the jobs you will do with it: moving a repository onto it, configuring its tiers, reading why a test ran, adding checks of your own, and keeping a laptop responsive. The Developer Guide explains how fastci is built and how a new language joins it.
+The [Quick Start](quick-start.html) runs fastci on a small project in a few minutes. The User Guide then follows the jobs you will do with it: moving a repository onto it, configuring its tiers, reading why a test ran, adding checks of your own, keeping a laptop responsive, and reading the suite's health. The Developer Guide explains how fastci is built and how a new language joins it.

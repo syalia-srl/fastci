@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `fastci report`: the suite's health from the default branch's maps, without
+  running a test. Time (expensive set-up, slowest tests, much time over little
+  code, time by test file, the cost of `always`), overlap (tests on the same
+  code path, almost the same, the start-up path), coverage by file with the
+  untested functions, files never imported, and flaky tests from the history.
+  Text by default, `--json` for the whole model, `--html` for one page;
+  `--maps N` takes median durations over the newest N maps.
 - The map is version 3. It also records the lines that run outside any test (at
   import, during collection), the executable lines of every source file, each
   test's set-up, call and teardown seconds, each fixture run with its seconds

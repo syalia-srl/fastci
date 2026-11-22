@@ -42,7 +42,11 @@ def sample(tmp_path):
 
 def run_testmap(repo, *args):
     """Run the fastci map CLI inside the repo; return (exit code, stdout, stderr)."""
-    args = ("map", *args)
+    return run_cli(repo, "map", *args)
+
+
+def run_cli(repo, *args):
+    """Run the fastci CLI inside the repo; return (exit code, stdout, stderr)."""
     env = dict(os.environ)
     env.pop("FASTCI_SELECT", None)
     env.pop("FASTCI_RECORD", None)

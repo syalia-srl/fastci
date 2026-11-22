@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+:root{--bg:#11100e;--surface:#191814;--raised:#1d1b17;--rule:#2a2721;--ink:#dcd9cf;--strong:#f1ede2;
+--muted:#8a867b;--faint:#6f6b62;--accent:#e0a872;--ok:#9db07e;--err:#d9806f;
+--ui:system-ui,-apple-system,'Segoe UI',sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}
+main{max-width:1180px;margin:0 auto;padding:28px 32px 80px}
+h1{font:500 20px var(--mono);color:var(--strong);margin:0 0 6px}
+h2{font:500 15px var(--mono);color:var(--strong);margin:44px 0 6px;padding-top:12px;border-top:1px solid var(--rule)}
+h3{font:500 13px var(--mono);color:var(--accent);margin:28px 0 4px}
+.meta,.total,.points,.note{font-family:var(--mono);font-size:12px;color:var(--muted);margin:2px 0}
+.points{color:var(--faint)}
+.note{color:var(--accent)}
+code,td{overflow-wrap:anywhere}
+ul.head{margin:10px 0;padding-left:18px;color:var(--muted)}
+input.filter{font:12px var(--mono);background:var(--surface);color:var(--ink);border:1px solid var(--rule);
+border-radius:6px;padding:5px 9px;margin:8px 0;width:min(320px,100%)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:4px 0}
+th{text-align:left;font:500 11px var(--mono);color:var(--faint);padding:6px 8px;border-bottom:1px solid var(--rule);cursor:pointer;user-select:none}
+th:hover{color:var(--strong)}
+td{padding:7px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+td.n{font-family:var(--mono);white-space:nowrap;text-align:right}
+td.id{font-family:var(--mono);font-size:12px;color:var(--strong)}
+tr:hover td{background:var(--raised)}
+.bar{display:inline-block;height:8px;border-radius:2px;background:var(--ok);vertical-align:middle;margin-right:6px}
+.bar.lo{background:var(--err)}
+.tag{font:11px var(--mono);color:var(--accent);border:1px solid #5a4430;border-radius:999px;padding:0 6px;margin-left:4px;white-space:nowrap}
+.sub{color:var(--muted);font-size:12px}
+@media (max-width:640px){
+  main{padding:18px 12px 60px}
+  thead{display:none}
+  table,tbody,tr,td{display:block;width:auto}
+  tr{padding:8px 0;border-bottom:1px solid var(--rule)}
+  td{border:0;padding:2px 0;text-align:left}
+  td.n{text-align:left}
+  td[data-label]:before{content:attr(data-label) "  ";color:var(--faint);font:11px var(--mono)}
+}
+@media (pointer:coarse){th{padding:12px 8px}input.filter{min-height:44px}}
+</style></head>
+<body><main>
+{{BODY}}
+</main>
+<script type="application/json" id="model">{{MODEL}}</script>
+<script>
+for (const table of document.querySelectorAll("table")) {
+  const input = table.previousElementSibling;
+  if (input && input.classList.contains("filter"))
+    input.addEventListener("input", () => {
+      const q = input.value.toLowerCase();
+      for (const tr of table.tBodies[0].rows) tr.hidden = !tr.textContent.toLowerCase().includes(q);
+    });
+  table.querySelectorAll("th").forEach((th, col) => th.addEventListener("click", () => {
+    const rows = [...table.tBodies[0].rows];
+    const dir = th.dataset.dir === "asc" ? -1 : 1;
+    th.dataset.dir = dir === 1 ? "asc" : "desc";
+    const key = (tr) => {
+      const t = tr.cells[col].dataset.v ?? tr.cells[col].textContent;
+      const n = parseFloat(t);
+      return Number.isNaN(n) ? t : n;
+    };
+    rows.sort((a, b) => (key(a) > key(b) ? dir : key(a) < key(b) ? -dir : 0));
+    table.tBodies[0].append(...rows);
+  }));
+}
+</script>
+</body></html>
