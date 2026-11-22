@@ -61,7 +61,11 @@ demo.write(
         assert "pear" not in catalog
     """,
 )
-demo.edit("pyproject.toml", "[tool.pytest.ini_options]", "[tool.fastci.flaky]\nreach-share = 0.4\n\n[tool.pytest.ini_options]")
+demo.edit(
+    "pyproject.toml",
+    "[tool.pytest.ini_options]",
+    "[tool.fastci.flaky]\nreach-share = 0.4\n\n[tool.pytest.ini_options]",
+)
 demo.commit("receipts, a catalog and old code", merge=True)
 ```
 
