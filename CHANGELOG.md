@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 Tuned on the version 3 maps of four repositories, where 19 of 283 judged
 findings were false:
