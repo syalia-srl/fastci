@@ -6,7 +6,7 @@ import os
 import statistics
 from collections import defaultdict
 
-from . import LITTLE_CODE_FACTOR, LITTLE_CODE_MIN_S, Suite, base_id, section
+from . import LITTLE_CODE_FACTOR, LITTLE_CODE_MIN_S, MIN_FIXTURE_S, Suite, base_id, section
 
 NO_V3 = "this map has no {what} (version {v}); re-record it with this fastci"
 
@@ -39,6 +39,8 @@ def setup_cost(s: Suite) -> dict:
     out = []
     for f, rs in runs.items():
         name, scope, baseid = tm.fixtures[f]
+        if sum(r[2] for r in rs) < MIN_FIXTURE_S:
+            continue
         keys: dict = defaultdict(int)
         for t, worker, _ in rs:
             k = _rebuild_key(scope, tm.tests[t], worker)
@@ -53,6 +55,7 @@ def setup_cost(s: Suite) -> dict:
                 "tests": takers[f],
                 "seconds": round(sum(r[2] for r in rs), 3),
                 "rebuilt": sum(c - 1 for c in keys.values()),
+                "workers": len({worker for _, worker, _ in rs}),
             }
         )
     out.sort(key=lambda e: -e["seconds"])
@@ -61,6 +64,11 @@ def setup_cost(s: Suite) -> dict:
 
 def slowest(s: Suite) -> dict:
     tm = s.tm
+    # A wider fixture's first run lands in the set-up of whichever test asked first.
+    shared: dict[int, float] = defaultdict(float)
+    for f, t, _, seconds in tm.fixture_runs:
+        if tm.fixtures[f][1] != "function":
+            shared[t] += seconds
     by: dict[str, dict] = {}
     for i, t in enumerate(tm.tests):
         e = by.setdefault(
@@ -73,9 +81,11 @@ def slowest(s: Suite) -> dict:
                 "call": 0.0,
                 "teardown": 0.0,
                 "marks": [],
+                "shared_setup": 0.0,
             },
         )
         e["cases"] += 1
+        e["shared_setup"] += shared.get(i, 0.0)
         e["seconds"] += s.durations[i]
         for k, v in zip(
             ("setup", "call", "teardown"), s.phases[i] if s.phases else (), strict=False
@@ -86,6 +96,7 @@ def slowest(s: Suite) -> dict:
     out = sorted(by.values(), key=lambda e: -e["seconds"])
     for e in out:
         e["share"] = round(e["seconds"] / s.total, 4) if s.total else 0.0
+        e["shared_setup"] = round(e["shared_setup"], 3)
         for k in ("seconds", "setup", "call", "teardown"):
             e[k] = round(e[k], 3) if s.phases or k == "seconds" else None
     top10 = sum(e["seconds"] for e in out[:10])

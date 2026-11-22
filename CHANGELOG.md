@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Tuned on the version 3 maps of four repositories, where 19 of 283 judged
+findings were false:
+
+- A parametrized test whose parameters hold `::` or brackets is one entry.
+- *Expensive set-up* leaves out fixtures under 0.1 s in all and says when a
+  wider fixture ran once on each of several xdist workers.
+- *Slowest tests* says how much of a test's set-up is a wider fixture's
+  first run.
+- *Start-up path* no longer sums the tests' seconds as if they were the
+  functions' cost.
+- *Never imported* tells scripts (`__main__.py` included), modules a function
+  imports when it runs, and modules nothing imports apart.
+- The header counts the xdist workers.
+
 ## 0.4.0
 
 - `fastci` says when a newer release exists and which tag to pin: once a day

@@ -32,3 +32,4 @@ def test_functions_most_of_the_suite_runs_form_the_startup_path():
     )
     (e,) = startup_path(s)["entries"]
     assert sorted(e["functions"]) == ["app.py::boot", "app.py::config"] and e["tests"] == 9
+    assert "seconds" not in e  # the tests' own seconds are not the functions' cost

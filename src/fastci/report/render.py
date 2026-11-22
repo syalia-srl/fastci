@@ -71,6 +71,8 @@ def _pct(x: float) -> str:
 def _entry(key: str, e: dict) -> list[str]:
     if key == "setup_cost":
         rebuilt = f", rebuilt {e['rebuilt']}x" if e["rebuilt"] else ""
+        if e["workers"] > 1 and e["scope"] != "function":
+            rebuilt += f", once on each of {e['workers']} workers"
         return [
             f"{_s(e['seconds'])}  {e['fixture']} ({e['scope']}, {e['defined_in'] or 'root'})"
             f": {e['runs']} runs for {e['tests']} tests{rebuilt}"
@@ -83,7 +85,12 @@ def _entry(key: str, e: dict) -> list[str]:
             phases = (
                 f"  set-up {e['setup']:.2f} / call {e['call']:.2f} / teardown {e['teardown']:.2f}"
             )
-        return [f"{_s(e['seconds'])}  {_pct(e['share'])}{phases}  {e['test']}{cases}{marks}"]
+        shared = ""
+        if e["shared_setup"]:
+            shared = f" ({e['shared_setup']:.2f} s of set-up is a wider fixture's first run)"
+        return [
+            f"{_s(e['seconds'])}  {_pct(e['share'])}{phases}  {e['test']}{cases}{marks}{shared}"
+        ]
     if key == "little_code":
         sp = ", started a child process" if e["spawns"] else ""
         return [f"{_s(e['call'])} in call over {e['lines']} lines run{sp}  {e['test']}"]
@@ -112,8 +119,8 @@ def _entry(key: str, e: dict) -> list[str]:
         return [head] + [f"    +{t['adds']:<4} {t['test']}" for t in e["tests"]]
     if key == "startup_path":
         head = (
-            f"{e['tests']} tests, {_s(e['seconds'])}, median {e['median']:.3f} s, "
-            f"{len(e['functions'])} functions"
+            f"{e['tests']} tests (median {e['median']:.3f} s each) "
+            f"run these {len(e['functions'])} functions"
         )
         return (
             [head]
@@ -132,8 +139,7 @@ def _entry(key: str, e: dict) -> list[str]:
             f"    untested: {u['function']} ({u['lines']} lines)" for u in e["untested"][:5]
         ]
     if key == "never_imported":
-        kind = "script" if e["script"] else "module"
-        return [f"{e['lines']:5} lines  {kind}  {e['file']}"]
+        return [f"{e['lines']:5} lines  {e['kind']}  {e['file']}"]
     if key is None:  # flaky
         flag = f", flagged #{e['issue']}" if e["issue"] else ""
         return [f"{e['failures']}/{e['runs']} runs failed ({_pct(e['rate'])}){flag}  {e['test']}"]
@@ -174,7 +180,7 @@ def _header(h: dict) -> list[str]:
         out.append(f"recorded with: {' '.join(h['args'])}")
     out.append(
         f"deselected when recorded: {h['deselected']}; started a child process: "
-        f"{h['spawns']}; maps read: {h['maps']}"
+        f"{h['spawns']}; workers: {h['workers']}; maps read: {h['maps']}"
     )
     for s in h["skipped"]:
         always = ", on every map" if s["every_map"] and h["maps"] > 1 else ""
@@ -256,8 +262,14 @@ def _row_slowest(e):
         _n("set-up", e["setup"]),
         _n("call", e["call"]),
         _n("teardown", e["teardown"]),
-        _id("test", _e(e["test"]) + _cases(e) + _tags(e["marks"])),
+        _id("test", _e(e["test"]) + _cases(e) + _tags(e["marks"]) + _shared(e)),
     ]
+
+
+def _shared(e) -> str:
+    if not e["shared_setup"]:
+        return ""
+    return _sub(f"{e['shared_setup']:.2f} s of its set-up is a wider fixture's first run")
 
 
 def _row_little_code(e):
@@ -310,7 +322,6 @@ def _row_near_same(e):
 def _row_startup_path(e):
     return [
         _n("tests", e["tests"], "{}"),
-        _n("seconds", e["seconds"]),
         _n("median", e["median"], "{:.3f}"),
         _id("functions", "<br>".join(_e(f) for f in e["functions"])),
     ]
@@ -337,7 +348,7 @@ def _row_by_file(e):
 def _row_never_imported(e):
     return [
         _n("lines", e["lines"], "{}"),
-        _td("kind", "script" if e["script"] else "module"),
+        _td("kind", _e(e["kind"])),
         _id("file", _e(e["file"])),
     ]
 
@@ -359,7 +370,7 @@ HEADS = {
     "always_cost": ["seconds", "test"],
     "same_path": ["beyond fastest", "seconds", "own lines", "files", "tests"],
     "near_same": ["seconds", "common lines", "file", "tests (+ own lines beyond the common core)"],
-    "startup_path": ["tests", "seconds", "median", "functions"],
+    "startup_path": ["tests", "median", "functions"],
     "by_file": ["coverage", "run / lines", "tests", "file"],
     "never_imported": ["lines", "kind", "file"],
     None: ["rate", "failed / runs", "issue", "test"],

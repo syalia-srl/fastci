@@ -110,9 +110,9 @@ def startup_path(s: Suite) -> dict:
             {
                 "functions": sorted(funcs),
                 "tests": len(ids),
-                "seconds": round(sum(ds), 3),
+                # No summed seconds: they are the tests' own time, not the functions' cost.
                 "median": round(statistics.median(ds), 4),
             }
         )
-    out.sort(key=lambda e: (-e["tests"], -e["seconds"]))
+    out.sort(key=lambda e: (-e["tests"], -len(e["functions"])))
     return section(out, _total(s))

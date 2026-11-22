@@ -23,9 +23,14 @@ def test_a_file_a_spawning_test_reads_is_tagged_spawns(health_map):
     assert "spawns" in e["src/health/core.py"]["tags"]
 
 
-def test_dead_code_and_scripts_are_told_apart(health_map):
-    e = {x["file"]: x["script"] for x in never_imported(suite_of(health_map))["entries"]}
-    assert e == {"src/health/dead.py": False, "src/health/tool.py": True}
+def test_dead_code_scripts_and_lazy_imports_are_told_apart(health_map):
+    e = {x["file"]: x["kind"] for x in never_imported(suite_of(health_map))["entries"]}
+    assert e == {
+        "src/health/dead.py": "module",
+        "src/health/tool.py": "script",
+        "src/health/__main__.py": "script",
+        "src/health/lazy.py": "imported lazily",
+    }
 
 
 def test_the_header_names_what_the_map_cannot_see(health_map):
@@ -76,3 +81,7 @@ def test_a_file_a_deselected_tests_file_imports_is_tagged_outside_the_lane(tmp_p
     tm.lane = {"deselected": ["tests/test_gpu.py::test_gpu"], "skipped": {}}
     (e,) = by_file(Suite(maps=[tm], root=str(tmp_path), reach_share=0.2))["entries"]
     assert e["tags"] == ["outside the lane"]
+
+
+def test_the_header_counts_the_workers(health_map):
+    assert header(suite_of(health_map))["workers"] == 1

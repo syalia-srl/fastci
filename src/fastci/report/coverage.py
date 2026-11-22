@@ -177,11 +177,34 @@ def _named_in_docs(root: str) -> str:
     return "\n".join(text)
 
 
+def _lazily_imported(s: Suite) -> set[str]:
+    """Source files some function imports when it runs, such as a CLI's subcommands."""
+    mods = _modules(s)
+    out = set()
+    for f in s.tm.executable:
+        try:
+            tree = ast.parse(Path(s.root, f).read_text())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(fn):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+                out.update(mods[n] for n in names if n in mods)
+    return out
+
+
 def never_imported(s: Suite) -> dict:
     tm = s.tm
     if tm.version < 3:
         return section(note=f"this map has no executable lines (version {tm.version})")
     docs = None
+    lazy = None
     out = []
     for f, exe in sorted(tm.executable.items()):
         if not exe or _run(s, f) & exe:
@@ -190,12 +213,22 @@ def never_imported(s: Suite) -> dict:
             text = Path(s.root, f).read_text(errors="ignore")
         except OSError:
             text = ""
-        script = bool(MAIN.search(text)) or bool(SCRIPT_DIRS & set(Path(f).parts[:-1]))
+        script = (
+            bool(MAIN.search(text))
+            or os.path.basename(f) == "__main__.py"
+            or bool(SCRIPT_DIRS & set(Path(f).parts[:-1]))
+        )
         if not script:
             docs = _named_in_docs(s.root) if docs is None else docs
             script = os.path.basename(f) in docs
-        out.append({"file": f, "lines": len(exe), "script": script})
-    out.sort(key=lambda e: (e["script"], -e["lines"]))
+        if script:
+            kind = "script"
+        else:
+            lazy = _lazily_imported(s) if lazy is None else lazy
+            kind = "imported lazily" if f in lazy else "module"
+        out.append({"file": f, "lines": len(exe), "kind": kind})
+    order = {"module": 0, "imported lazily": 1, "script": 2}
+    out.sort(key=lambda e: (order[e["kind"]], -e["lines"]))
     return section(out, {"files": len(out), "lines": sum(e["lines"] for e in out)})
 
 
@@ -221,6 +254,7 @@ def header(s: Suite) -> dict:
             for t, r in sorted(skipped.items())
         ],
         "spawns": len(tm.spawns),
+        "workers": len({w for _, _, w, _ in tm.fixture_runs}) or 1,
         "shared_lines": s.shared_lines,
         "reach_share": s.reach_share,
         "maps": len(s.maps),
