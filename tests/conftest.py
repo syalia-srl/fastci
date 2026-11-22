@@ -27,6 +27,8 @@ def _no_outer_fastci_run(monkeypatch):
     github += ("GITHUB_EVENT_PATH", "GITHUB_SHA")
     for k in github:
         monkeypatch.delenv(k, raising=False)
+    # No lookup of fastci's latest release from the tests or the runs they start.
+    monkeypatch.setenv("FASTCI_NO_VERSION_CHECK", "1")
 
 
 @pytest.fixture

@@ -50,3 +50,7 @@ demo.sh("fastci guide")
 ```
 
 The first push to the default branch after the merge uploads the first map. Until then a pull request runs every test and says so.
+
+## Keeping fastci up to date
+
+A repository pins fastci to a release tag, so it does not change under a pull request. When a newer release exists, `fastci` says so on its first lines: once a day at most on a laptop, and on every run in GitHub Actions, where the line is also a warning on the run and in its summary, so that an agent reading the run sees it. The notice names the tag to pin and links the release notes. It never fails a run, says nothing without a network, and `FASTCI_NO_VERSION_CHECK=1` turns it off.

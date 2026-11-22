@@ -93,6 +93,12 @@ the cause of the miss:
 - a rule that should have picked the test: open an issue on fastci with the
   change and the test, so the rule gets a fixture case.
 
+## When fastci says it is out of date
+
+Bump the pin it names (`git+https://github.com/syalia-srl/fastci@vX.Y.Z`) in
+every workflow and doc of the repository that installs fastci, read the
+release notes it links, and land the bump as its own small change.
+
 ## Before a release: read the suite's health
 
 Run `fastci report` (add `--maps 5` for median durations). Read the header
