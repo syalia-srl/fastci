@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - `fastci report`: the suite's health from the default branch's maps, without
   running a test. Time (expensive set-up, slowest tests, much time over little
