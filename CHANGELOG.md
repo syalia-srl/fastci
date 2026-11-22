@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - `fastci` says when a newer release exists and which tag to pin: once a day
   at most on a laptop, on every run in GitHub Actions as a warning annotation
